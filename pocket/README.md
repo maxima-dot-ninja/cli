@@ -13,7 +13,37 @@ ln -s "$(pwd)/pocket.ts" /opt/homebrew/bin/pocket
 
 ## Auth
 
-Reads the app key from `POCKET_APP_KEY`, falling back to `~/.config/pocket/key`.
+Get an app key from your [Pocket AI account](https://docs.heypocketai.com/docs/api).
+Keys look like `pk_…`.
+
+**Recommended — a key file.** Copy the key first, then:
+
+```sh
+mkdir -p ~/.config/pocket
+pbpaste > ~/.config/pocket/key
+chmod 600 ~/.config/pocket/key
+```
+
+Piping from the clipboard keeps the key out of your shell history. Don't `echo` it
+into the file — that leaves a copy in `~/.zsh_history` forever.
+
+**Alternative — an environment variable.** Add to `~/.zshrc`:
+
+```sh
+export POCKET_APP_KEY="pk_..."
+```
+
+The env var wins if both are set. Whitespace and trailing newlines are trimmed, so a
+file written by `pbpaste` works as-is.
+
+**Check it worked:**
+
+```sh
+pocket list     # prints your recordings, or "No API key found."
+```
+
+> **Never put the key in this repo.** It belongs in `~/.config/` or the environment.
+> Exports, config, and credentials all live outside the project tree by design.
 
 `search` and `index` need no key — they only read already-exported files.
 
