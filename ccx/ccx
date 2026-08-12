@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+# ccx — claude with permissions bypassed + remote control on.
+#
+# Names the session after the last two path components plus a counter, so
+# dev/_www/croissant/api becomes croissant-api-000, and a second session in the
+# same folder becomes croissant-api-001.
+#
+# Any extra args are passed straight through to claude. Pass your own --name to
+# opt out of the auto-naming.
+
+SESSIONS="$HOME/.claude/sessions"
+
+slug() {
+  printf '%s' "$1" |
+    tr '[:upper:]' '[:lower:]' |
+    sed -e 's/[^a-z0-9]\{1,\}/-/g' -e 's/^-*//' -e 's/-*$//'
+}
+
+# /Users/a32/dev/_www/croissant/api -> croissant-api
+base_name() {
+  local dir parent base
+  dir=$(slug "$(basename -- "$PWD")")
+  parent=$(slug "$(basename -- "$(dirname -- "$PWD")")")
+  base="$parent-$dir"
+  base="${base#-}"
+  base="${base%-}"
+  printf '%s' "${base:-claude}"
+}
+
+# Claude keeps a live record per running session at ~/.claude/sessions/<pid>.json.
+# Anything whose pid is gone was killed without cleanup — its number is free again.
+taken_names() {
+  local file pid
+  for file in "$SESSIONS"/*.json; do
+    [ -e "$file" ] || continue
+    pid=$(basename -- "$file" .json)
+    kill -0 "$pid" 2>/dev/null || continue
+    grep -o '"name":"[^"]*"' "$file" | head -1 | cut -d'"' -f4
+  done
+}
+
+# Lowest free number, so closing 000 frees it for the next session.
+pick_name() {
+  local base="$1" taken candidate i
+  taken=$(taken_names 2>/dev/null)
+  for i in $(seq 0 999); do
+    candidate=$(printf '%s-%03d' "$base" "$i")
+    grep -qxF "$candidate" <<<"$taken" || { printf '%s' "$candidate"; return; }
+  done
+  printf '%s' "$base"
+}
+
+for arg in "$@"; do
+  case "$arg" in
+    -n | --name | --name=*)
+      exec claude --dangerously-skip-permissions --remote-control "$@"
+      ;;
+  esac
+done
+
+NAME=$(pick_name "$(base_name)")
+exec claude --dangerously-skip-permissions --remote-control "$NAME" --name "$NAME" "$@"

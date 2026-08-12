@@ -1,0 +1,27 @@
+# Rust (lgit)
+target/
+
+# Node / Bun (pocket)
+node_modules/
+*.tsbuildinfo
+
+# Claude local overrides — machine-specific, keep shared settings.json tracked
+**/.claude/settings.local.json
+
+# Secrets — nothing here should ever be committed
+.env
+.env.*
+*.pem
+*.p12
+*.key
+.netrc
+
+# Editors
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# macOS
+.DS_Store
