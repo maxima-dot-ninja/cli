@@ -14,15 +14,19 @@ Each tool stands alone — install only what you want.
 ## agree
 
 Everything the [Agree API](https://secure.agree.com/documentation) exposes — invoices,
-agreements, contacts, reports — plus optional natural-language commands.
+agreements, contacts, reports — three ways: shortcuts, direct calls to all 38
+operations, and a conversational agent.
 
 ```sh
-agree invoices --status due       # deterministic
-agree contacts samir              # find a contact by any fragment
+agree invoices --status due            # shortcut
+agree call delete_invoice id=abc       # any operation directly
+agree agent                            # chat, with follow-ups
 ```
 
-Amounts are handled in integer cents internally, because the API bills in cents and
-sending `50` for "$50" charges 50 cents. Full docs: [agree/README.md](agree/README.md).
+The agent plans and calls tools one at a time, but never touches the API itself and
+never sees your key — and every change stops for confirmation. Amounts are handled
+in integer cents throughout, because the API bills in cents and sending `50` for
+"$50" charges 50 cents. Full docs: [agree/README.md](agree/README.md).
 
 ## pocket
 

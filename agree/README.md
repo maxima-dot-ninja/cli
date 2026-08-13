@@ -63,6 +63,10 @@ agree writes that file `600` automatically. **`AGREE_API_KEY` wins if both are s
 
 ## Usage
 
+There are three ways in, and none of them is the only way to reach anything.
+
+**Shortcuts** for the things you do constantly:
+
 ```sh
 agree config                      # where config lives, whether a key is set
 agree invoices                    # recent invoices
@@ -75,7 +79,27 @@ agree agreements
 agree templates
 ```
 
-Add `--json` to any command for raw JSON.
+Add `--json` to any of them for raw JSON.
+
+**Every API operation, directly.** Nothing is AI-only:
+
+```sh
+agree tools                                    # list all 38 operations
+agree call get_invoice id=6d3571fa-…
+agree call list_invoices statuses=due,failed
+agree call delete_invoice id=6d3571fa-…        # asks before it runs
+agree call mark_invoice_paid id=… --yes        # skip the confirmation
+```
+
+Arguments are `key=value`. Values that look like JSON are parsed as JSON, so numbers
+and lists work: `page_size=100`, `events=["invoice.paid"]`.
+
+**Chat**, for anything that takes more than one call:
+
+```sh
+agree agent                       # open a conversation
+agree 'how many invoices…'        # answer, then stay open for follow-ups
+```
 
 ## Natural language
 
@@ -96,17 +120,47 @@ agree 'find the contact at croissant'
 > You'll be prompted for the amount either way, so nothing breaks — but single
 > quotes save you the extra question.
 
-The model only ever produces a JSON description of what you asked for. It never
-calls the API, never sees a key, and never invents an email address. Everything it
-returns is re-validated: an amount it cannot parse counts as missing rather than
-guessed, and anything missing becomes a prompt. Nothing is sent until the full
-invoice is shown back to you and confirmed.
+### How it works
 
-Dates are never accepted silently — they're shown pre-filled with the weekday
-spelled out, because models resolve "next friday" wrong often enough to matter.
+The model plans; it never touches the API itself. Each turn it names one tool, the
+program runs it, and the result comes back for the next decision — up to 10 steps.
+You see each step as it happens:
+
+```
+› how many invoices have i sent to samir? they're supposed to be weekly
+
+  → Find Samir's contact — the API can't search by person name
+  → List invoices for Treehaus LLC
+
+  You've sent 1 invoice to Samir Rayani, due 2026-07-08, still unpaid.
+
+  Counting Wednesdays from 2026-07-08 to today: Jul 8, 15, 22, 29, Aug 5, 12 —
+  6 should exist. Only 1 was created, stuck at sequence 0.
+  Gap: 5 missing invoices.
+```
+
+It is told to **diagnose, not just report** — count the periods, compare against
+what exists, lead with the gap, and end with what to do about it. A readout of
+correct-looking data is not useful if the data is wrong.
+
+### What it is not allowed to do
+
+- **It never sees your API key** and never makes an HTTP call. It names a tool; the
+  program makes the call.
+- **Every change stops for confirmation**, showing the exact request first.
+- **It cannot invent an amount, an email address or an id.** An amount it cannot
+  parse counts as missing, not guessed — and missing becomes a question.
+- **Creating an invoice always goes through the form**, never a raw request. That is
+  where dollars become cents, a name becomes a real contact, and a weekly repeat
+  gets its weekday. A model writing `5000` where cents are expected is a 100×
+  billing error, so that path stays guarded.
+- **Dates are never accepted silently.** They are shown pre-filled with the weekday
+  spelled out, because models resolve "next friday" wrong often enough to matter.
 
 Pick your provider and model with `agree model`. Ollama runs locally and needs no
-key; smaller local models simply mean more prompts to fill in.
+key; a smaller local model just means more questions to fill in.
+
+Set `AGREE_DEBUG=1` to see the raw model replies.
 
 ## Notes on the API
 
@@ -126,11 +180,29 @@ Things worth knowing, all of which agree handles for you:
 
 The full vendored spec is in [`openapi.json`](openapi.json).
 
+## Things the API does that will surprise you
+
+Found by hitting them, not by reading:
+
+- **A recurring invoice backdated to the past sends once, then stalls.** Set a weekly
+  series starting five weeks ago and you get one invoice at `recurring_sequence 0`
+  and nothing after it. There is no backfill.
+- **`scheduled_at` in the past is accepted silently**, then sends at some later
+  moment you did not pick. agree clamps the send date to the due date, which the API
+  requires (`Invoice date cannot be after due date`), and shows both in the review.
+- **A weekly repeat is rejected without `repeat_on_weekday`**, and a monthly one
+  without `repeat_on_type` + `repeat_on_day`. agree fills these from the due date.
+
 ## Status
 
-Working today: config, and read commands for invoices, contacts, customers,
-agreements and templates — all verified against the live API.
+Working and verified against the live API: config, the read commands, all 38
+operations through `agree call`, the conversation agent, and creating invoices
+through the form.
 
-Planned: writes (create/send invoices, agreements) behind a confirmation step, a
-schema-driven form for filling gaps, and an optional natural-language layer that
-turns "recurring invoice for Samir, $5000/week" into a reviewed, typed request.
+Not done yet:
+
+- **Re-prompting on a validation error.** A rejection currently drops you out; the
+  errors are already structured per field, so it should re-ask just the bad one.
+- **Creating agreements.** Needs a template to exist first — `agree templates`.
+- **A non-interactive mode.** `agree agent` needs a real terminal; in a pipe it
+  exits immediately.
