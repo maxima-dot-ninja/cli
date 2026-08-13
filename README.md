@@ -1,14 +1,28 @@
 # _cli
 
-Personal command-line tools. One repo, three independent tools, no shared build.
+Personal command-line tools. One repo, four independent tools, no shared build.
 
 | Tool | What it does | Stack |
 |---|---|---|
+| [**agree**](agree/README.md) | Invoices, agreements and contacts on the Agree API | Rust |
 | [**pocket**](pocket/README.md) | Export and search recorded conversations | Bun / TypeScript |
 | [**lgit**](lgit/README.md) | AI-written git commit messages | Rust |
 | **ccx** | Claude Code launcher with auto-named sessions | Bash |
 
 Each tool stands alone — install only what you want.
+
+## agree
+
+Everything the [Agree API](https://secure.agree.com/documentation) exposes — invoices,
+agreements, contacts, reports — plus optional natural-language commands.
+
+```sh
+agree invoices --status due       # deterministic
+agree contacts samir              # find a contact by any fragment
+```
+
+Amounts are handled in integer cents internally, because the API bills in cents and
+sending `50` for "$50" charges 50 cents. Full docs: [agree/README.md](agree/README.md).
 
 ## pocket
 
@@ -70,19 +84,56 @@ ln -s "$PWD/ccx/ccx" /opt/homebrew/bin/ccx
 
 # lgit — needs rust 1.70+
 cargo install --path lgit
+
+# agree — needs rust 1.70+
+cargo install --path agree
 ```
 
 Symlinks rather than copies, so edits to the source are live immediately.
 
-## Credentials
+## API keys
 
-No secrets live in this repo. Every tool reads its keys from outside it:
+**All keys go in one file: `~/.config/secrets.env`.** Nothing else needs editing.
 
-| Tool | Reads from |
-|---|---|
-| pocket | `POCKET_APP_KEY`, else `~/.config/pocket/key` |
-| lgit | `~/.config/lgit/config.toml`, or the provider's env var |
-| ccx | — |
+```sh
+mkdir -p ~/.config && chmod 700 ~/.config
+touch ~/.config/secrets.env && chmod 600 ~/.config/secrets.env
+```
 
-Keep it that way. `.gitignore` blocks `.env`, `*.key`, and `*.pem` as a backstop,
-but the rule is that config belongs in `~/.config/`, never in the tree.
+Put your keys in it:
+
+```sh
+export AGREE_API_KEY="agr_..."        # agree
+export POCKET_APP_KEY="pk_..."        # pocket
+export ANTHROPIC_API_KEY="sk-ant-..." # lgit, agree (AI features)
+export OPENAI_API_KEY="sk-..."        # alternative AI provider
+export GOOGLE_API_KEY="..."           # alternative AI provider
+```
+
+Load it once from `~/.zshrc`:
+
+```sh
+[ -f ~/.config/secrets.env ] && source ~/.config/secrets.env
+```
+
+Open a new terminal and every tool picks them up. **Environment always wins over a
+tool's own config file**, so this one file overrides everything.
+
+### Where each tool looks
+
+| Tool | Environment variable | Config file fallback |
+|---|---|---|
+| **agree** | `AGREE_API_KEY` | `~/.config/agree/config.toml` |
+| **pocket** | `POCKET_APP_KEY` | `~/.config/pocket/key` |
+| **lgit** | provider's own var (`ANTHROPIC_API_KEY`, …) | `~/.config/lgit/config.toml` |
+| **ccx** | — | — |
+
+Every config file lives in `~/.config/<tool>/` and is written `600`.
+
+### Rules
+
+- **Never put a key in this repo.** `.gitignore` blocks `.env`, `*.key`, and `*.pem`
+  as a backstop, but the rule is that credentials live in `~/.config/`.
+- **Never `echo` a key into a file** — it lands in `~/.zsh_history` permanently.
+  Use `pbpaste >` or an editor.
+- **Keep `secrets.env` out of your dotfiles repo** if you sync those.

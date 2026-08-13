@@ -149,14 +149,45 @@ lgit --gpginfo  # Show GPG key setup instructions
 
 ## Configuration
 
-Config lives in your platform's config directory:
+### Where to put your API key
 
-| Platform | Path |
-|---|---|
-| macOS | `~/Library/Application Support/lgit/config.toml` |
-| Linux | `~/.config/lgit/config.toml` (or `$XDG_CONFIG_HOME/lgit/`) |
+**Recommended — `~/.config/secrets.env`**, using your provider's standard variable:
 
-Run `lgit --config` to print the exact path on your machine.
+```sh
+mkdir -p ~/.config && chmod 700 ~/.config
+touch ~/.config/secrets.env && chmod 600 ~/.config/secrets.env
+```
+
+```sh
+export ANTHROPIC_API_KEY="sk-ant-..."   # or OPENAI_API_KEY / GOOGLE_API_KEY
+```
+
+Load it from `~/.zshrc`:
+
+```sh
+[ -f ~/.config/secrets.env ] && source ~/.config/secrets.env
+```
+
+Ollama runs locally and needs no key at all.
+
+**Alternative — `lgit --setup`** writes the key into the config file for you. Don't
+`echo` a key into it by hand; that leaves a copy in `~/.zsh_history` forever.
+
+Run `lgit --config` to see which key is in use.
+
+### Config file
+
+Config lives at `~/.config/lgit/config.toml`, or `$XDG_CONFIG_HOME/lgit/` if you set
+that. Same place on every platform, alongside `git`, `gh`, and everything else.
+
+The file is written `600` — it holds an API key.
+
+> **Moved in 0.2.1.** Config used to live in the OS config directory, which on macOS
+> meant `~/Library/Application Support/lgit/`. That path is still read as a fallback
+> when `~/.config/lgit/config.toml` is absent, so an old install keeps working. Copy
+> your file over and delete the old one when convenient.
+
+Run `lgit --config` to print the path actually in use.
 
 ```toml
 [provider]

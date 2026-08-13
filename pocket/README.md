@@ -16,7 +16,26 @@ ln -s "$(pwd)/pocket.ts" /opt/homebrew/bin/pocket
 Get an app key from your [Pocket AI account](https://docs.heypocketai.com/docs/api).
 Keys look like `pk_…`.
 
-**Recommended — a key file.** Copy the key first, then:
+**Recommended — `~/.config/secrets.env`**, the one file every tool in this repo reads:
+
+```sh
+mkdir -p ~/.config && chmod 700 ~/.config
+touch ~/.config/secrets.env && chmod 600 ~/.config/secrets.env
+```
+
+Add the line:
+
+```sh
+export POCKET_APP_KEY="pk_..."
+```
+
+Load it from `~/.zshrc`:
+
+```sh
+[ -f ~/.config/secrets.env ] && source ~/.config/secrets.env
+```
+
+**Alternative — a key file at `~/.config/pocket/key`.** Copy the key first, then:
 
 ```sh
 mkdir -p ~/.config/pocket
@@ -25,16 +44,10 @@ chmod 600 ~/.config/pocket/key
 ```
 
 Piping from the clipboard keeps the key out of your shell history. Don't `echo` it
-into the file — that leaves a copy in `~/.zsh_history` forever.
+into either file — that leaves a copy in `~/.zsh_history` forever.
 
-**Alternative — an environment variable.** Add to `~/.zshrc`:
-
-```sh
-export POCKET_APP_KEY="pk_..."
-```
-
-The env var wins if both are set. Whitespace and trailing newlines are trimmed, so a
-file written by `pbpaste` works as-is.
+`POCKET_APP_KEY` wins if both are set. Whitespace and trailing newlines are trimmed,
+so a file written by `pbpaste` works as-is.
 
 **Check it worked:**
 

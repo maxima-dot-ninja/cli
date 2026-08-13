@@ -23,9 +23,19 @@ struct Response {
     content: Vec<ContentBlock>,
 }
 
+/// Reasoning models put a `thinking` block ahead of the answer, and that block
+/// carries no `text` field. Requiring `text` fails the whole parse; taking the
+/// first block returns the reasoning instead of the reply.
 #[derive(Deserialize)]
 struct ContentBlock {
-    text: String,
+    #[serde(default)]
+    text: Option<String>,
+}
+
+impl Response {
+    fn answer(&self) -> Option<String> {
+        self.content.iter().find_map(|block| block.text.clone())
+    }
 }
 
 /// Generate a commit message using Anthropic's API
@@ -58,14 +68,13 @@ pub async fn generate(config: &ProviderConfig, system: &str, prompt: &str) -> Re
         anyhow::bail!("Anthropic API error ({}): {}", status, body);
     }
 
-    let result: Response = response
-        .json()
+    // Read as text first so a parse failure can show what actually came back.
+    let body = response
+        .text()
         .await
-        .context("Failed to parse Anthropic response")?;
+        .context("Could not read Anthropic response")?;
+    let result: Response = serde_json::from_str(&body)
+        .with_context(|| format!("Unexpected Anthropic response shape: {body}"))?;
 
-    result
-        .content
-        .first()
-        .map(|c| c.text.clone())
-        .context("No content in Anthropic response")
+    result.answer().context("Anthropic returned no text block")
 }
