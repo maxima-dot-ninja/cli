@@ -1,13 +1,14 @@
 use crate::git::{GpgKey, StagedChange};
 use anyhow::{Context, Result};
 use console::{style, Term};
-use dialoguer::{Editor, Select};
+use dialoguer::{Editor, Input, Select};
 use indicatif::{ProgressBar, ProgressStyle};
 
 /// User action choices
 pub enum UserAction {
     Accept,
     Edit,
+    Ask,
     Regenerate,
     Cancel,
 }
@@ -66,7 +67,7 @@ pub fn print_staged_changes(changes: &[StagedChange]) {
         println!(
             "  {:<10} {:<40} {}",
             status_str,
-            style(&change.path).dim(),
+            style(change.location()).dim(),
             stats
         );
     }
@@ -99,6 +100,7 @@ pub fn prompt_action() -> Result<UserAction> {
     let items = vec![
         "✓ Accept and commit",
         "✎ Edit message",
+        "? Ask about the changes",
         "↻ Regenerate",
         "✕ Cancel",
     ];
@@ -113,9 +115,84 @@ pub fn prompt_action() -> Result<UserAction> {
     Ok(match selection {
         0 => UserAction::Accept,
         1 => UserAction::Edit,
-        2 => UserAction::Regenerate,
+        2 => UserAction::Ask,
+        3 => UserAction::Regenerate,
         _ => UserAction::Cancel,
     })
+}
+
+/// Ask a free-text follow-up. Empty input just returns to the menu.
+pub fn prompt_question() -> Result<String> {
+    println!();
+    let input: String = Input::new()
+        .with_prompt("Ask")
+        .allow_empty(true)
+        .interact_text()
+        .context("Failed to read your question")?;
+
+    Ok(input.trim().to_string())
+}
+
+/// Show the real `git diff` for one file, colored the way git would.
+pub fn print_file_diff(path: &str, diff: &str) {
+    const MAX_LINES: usize = 200;
+
+    println!();
+    println!("{} {}", style("📄").bold(), style(path).cyan().bold());
+    println!();
+
+    if diff.trim().is_empty() {
+        println!("  {}", style("(nothing staged for this file)").dim());
+        println!();
+        return;
+    }
+
+    for line in diff.lines().take(MAX_LINES) {
+        println!("  {}", style_diff_line(line));
+    }
+
+    let total = diff.lines().count();
+    if total > MAX_LINES {
+        println!(
+            "  {}",
+            style(format!(
+                "… {} more lines — run `git diff --cached -- {}` for the rest",
+                total - MAX_LINES,
+                path
+            ))
+            .dim()
+        );
+    }
+    println!();
+}
+
+fn style_diff_line(line: &str) -> console::StyledObject<&str> {
+    if line.starts_with("+++") || line.starts_with("---") || line.starts_with("diff --git") {
+        return style(line).dim();
+    }
+    if line.starts_with("index ") || line.starts_with("new file") || line.starts_with("deleted file")
+    {
+        return style(line).dim();
+    }
+    if line.starts_with("@@") {
+        return style(line).cyan();
+    }
+    if line.starts_with('+') {
+        return style(line).green();
+    }
+    if line.starts_with('-') {
+        return style(line).red();
+    }
+    style(line)
+}
+
+/// Print the model's spoken answer to a follow-up
+pub fn print_note(note: &str) {
+    for line in note.lines() {
+        println!("  {}", style(line).white());
+    }
+    println!();
+    print_separator();
 }
 
 /// Open an editor for the user to modify the commit message

@@ -12,9 +12,21 @@ pub struct GpgKey {
 #[derive(Debug)]
 pub struct StagedChange {
     pub path: String,
+    /// Where a renamed file came from — `None` for everything else
+    pub old_path: Option<String>,
     pub status: ChangeStatus,
     pub additions: usize,
     pub deletions: usize,
+}
+
+impl StagedChange {
+    /// "old -> new" for a rename, otherwise just the path
+    pub fn location(&self) -> String {
+        match &self.old_path {
+            Some(old) => format!("{} -> {}", old, self.path),
+            None => self.path.clone(),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -42,7 +54,10 @@ pub fn get_staged_changes() -> Result<Vec<StagedChange>> {
 
     let mut opts = StatusOptions::new();
     opts.include_ignored(false)
-        .include_untracked(false);
+        .include_untracked(false)
+        // Without this a moved file reports as one add plus one delete, which
+        // both doubles the diff and hides the fact that it was only moved.
+        .renames_head_to_index(true);
 
     let statuses = repo.statuses(Some(&mut opts))?;
     let mut changes = Vec::new();
@@ -51,7 +66,8 @@ pub fn get_staged_changes() -> Result<Vec<StagedChange>> {
     // Handle first commit (unborn branch) by diffing against empty tree
     let head_tree = repo.head().ok().and_then(|h| h.peel_to_tree().ok());
     let index = repo.index()?;
-    let diff = repo.diff_tree_to_index(head_tree.as_ref(), Some(&index), None)?;
+    let mut diff = repo.diff_tree_to_index(head_tree.as_ref(), Some(&index), None)?;
+    diff.find_similar(None)?;
 
     for entry in statuses.iter() {
         let status = entry.status();
@@ -66,7 +82,19 @@ pub fn get_staged_changes() -> Result<Vec<StagedChange>> {
             continue;
         }
 
-        let path = entry.path().unwrap_or("").to_string();
+        // For a rename, entry.path() gives the source; the destination only
+        // shows up on the delta, and that is the half worth reporting.
+        let renamed = status.contains(git2::Status::INDEX_RENAMED);
+        let delta_paths = entry.head_to_index().map(|delta| {
+            let old = delta.old_file().path().map(|p| p.to_string_lossy().to_string());
+            let new = delta.new_file().path().map(|p| p.to_string_lossy().to_string());
+            (old, new)
+        });
+
+        let (path, old_path) = match delta_paths {
+            Some((Some(old), Some(new))) if renamed && old != new => (new, Some(old)),
+            _ => (entry.path().unwrap_or("").to_string(), None),
+        };
 
         let change_status = if status.contains(git2::Status::INDEX_NEW) {
             ChangeStatus::Added
@@ -83,6 +111,7 @@ pub fn get_staged_changes() -> Result<Vec<StagedChange>> {
 
         changes.push(StagedChange {
             path,
+            old_path,
             status: change_status,
             additions,
             deletions,
@@ -146,7 +175,11 @@ pub fn get_staged_diff() -> Result<String> {
     let mut opts = DiffOptions::new();
     opts.include_untracked(false);
 
-    let diff = repo.diff_tree_to_index(head_tree.as_ref(), Some(&index), Some(&mut opts))?;
+    let mut diff = repo.diff_tree_to_index(head_tree.as_ref(), Some(&index), Some(&mut opts))?;
+    // Collapse add+delete pairs into renames before rendering. A moved file
+    // otherwise emits its entire content twice, which can inflate the diff
+    // several times over and push real changes past the size limit.
+    diff.find_similar(None)?;
 
     let mut diff_text = String::new();
     diff.print(git2::DiffFormat::Patch, |_delta, _hunk, line| {
@@ -158,14 +191,106 @@ pub fn get_staged_diff() -> Result<String> {
         true
     })?;
 
-    // Truncate if too large (keep under ~8k tokens worth)
+    Ok(budget_diff(&diff_text))
+}
+
+/// Trim an oversized diff without letting any file disappear.
+///
+/// Cutting the stream at a fixed byte count drops whole files off the end — the
+/// model then describes only the files that survived and invents a story for the
+/// rest. Giving every file its own slice of the budget keeps all of them visible.
+fn budget_diff(diff_text: &str) -> String {
     const MAX_DIFF_LEN: usize = 30000;
-    if diff_text.len() > MAX_DIFF_LEN {
-        diff_text.truncate(MAX_DIFF_LEN);
-        diff_text.push_str("\n\n... (diff truncated due to size)");
+
+    if diff_text.len() <= MAX_DIFF_LEN {
+        return diff_text.to_string();
     }
 
-    Ok(diff_text)
+    let sections = split_file_sections(diff_text);
+    if sections.is_empty() {
+        return clip_lines(diff_text, MAX_DIFF_LEN);
+    }
+
+    let per_file = MAX_DIFF_LEN / sections.len();
+    sections
+        .iter()
+        .map(|section| clip_lines(section, per_file))
+        .collect::<Vec<String>>()
+        .join("")
+}
+
+/// Split a patch into one chunk per file, keeping the "diff --git" header
+fn split_file_sections(diff_text: &str) -> Vec<String> {
+    let mut sections: Vec<String> = Vec::new();
+    let mut current = String::new();
+
+    for line in diff_text.lines() {
+        if line.starts_with("diff --git") && !current.is_empty() {
+            sections.push(std::mem::take(&mut current));
+        }
+        current.push_str(line);
+        current.push('\n');
+    }
+    if !current.is_empty() {
+        sections.push(current);
+    }
+    sections
+}
+
+/// Keep whole lines only, so the result never splits a UTF-8 character
+fn clip_lines(text: &str, max: usize) -> String {
+    if text.len() <= max {
+        return text.to_string();
+    }
+
+    let mut out = String::new();
+    for line in text.lines() {
+        if out.len() + line.len() + 1 > max {
+            break;
+        }
+        out.push_str(line);
+        out.push('\n');
+    }
+    out.push_str("... (rest of this file's diff omitted for length)\n");
+    out
+}
+
+/// One line per staged file: what happened to it and how many lines moved.
+///
+/// This is the ground truth about the change and it always reaches the model
+/// intact, even when the diff below it had to be trimmed.
+pub fn change_summary(changes: &[StagedChange]) -> String {
+    changes
+        .iter()
+        .map(|c| format!("{} {} (+{} -{})", c.status, c.location(), c.additions, c.deletions))
+        .collect::<Vec<String>>()
+        .join("\n")
+}
+
+/// Real `git diff --cached` output for one staged file. Runs from the repo root so
+/// the path resolves the same way regardless of which subdirectory lgit was run in.
+pub fn get_file_diff(path: &str) -> Result<String> {
+    let repo = Repository::open_from_env().context("Not a git repository")?;
+    let root = repo
+        .workdir()
+        .context("Repository has no working directory")?
+        .to_path_buf();
+
+    let output = std::process::Command::new("git")
+        .current_dir(&root)
+        .args(["diff", "--cached", "--", path])
+        .output()
+        .context("Failed to run git diff")?;
+
+    if !output.status.success() {
+        anyhow::bail!(
+            "git diff failed for {}: {}",
+            path,
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
 
 /// List available GPG secret keys
@@ -390,4 +515,78 @@ pub fn get_current_branch() -> Result<String> {
     let repo = Repository::open_from_env()?;
     let head = repo.head()?;
     Ok(head.shorthand().unwrap_or("HEAD").to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn file_section(name: &str, lines: usize) -> String {
+        let mut s = format!("diff --git a/{name} b/{name}\n--- a/{name}\n+++ b/{name}\n");
+        for i in 0..lines {
+            s.push_str(&format!("+line {i} of {name}\n"));
+        }
+        s
+    }
+
+    #[test]
+    fn small_diffs_pass_through_untouched() {
+        let diff = file_section("a.rs", 3);
+        assert_eq!(budget_diff(&diff), diff);
+    }
+
+    #[test]
+    fn every_file_survives_an_oversized_diff() {
+        // One huge file followed by small ones — the exact shape that used to
+        // let a blunt truncate swallow everything after the first file.
+        let diff = format!(
+            "{}{}{}",
+            file_section("huge.md", 4000),
+            file_section("small.ts", 5),
+            file_section("other.ts", 5)
+        );
+        assert!(diff.len() > 30000, "fixture must exceed the cap");
+
+        let out = budget_diff(&diff);
+        assert!(out.len() <= 30000 + 500, "budget respected, got {}", out.len());
+        for name in ["huge.md", "small.ts", "other.ts"] {
+            assert!(out.contains(name), "{name} was dropped from the trimmed diff");
+        }
+    }
+
+    #[test]
+    fn clipping_keeps_whole_lines() {
+        let text = "diff --git a/x b/x\n+aaaa\n+bbbb\n+cccc\n";
+        let out = clip_lines(text, 30);
+        assert!(out.lines().all(|l| !l.is_empty() || l.is_empty()));
+        assert!(out.contains("omitted for length"));
+        assert!(out.len() <= 30 + 60);
+    }
+
+    #[test]
+    fn clipping_never_splits_a_utf8_char() {
+        let text = "diff --git a/x b/x\n+é€ñ 🚀 multibyte content here\n+more\n";
+        let out = clip_lines(text, 25);
+        assert!(out.is_char_boundary(out.len()));
+    }
+
+    #[test]
+    fn sections_split_per_file() {
+        let diff = format!("{}{}", file_section("a.rs", 2), file_section("b.rs", 2));
+        let sections = split_file_sections(&diff);
+        assert_eq!(sections.len(), 2);
+        assert!(sections[0].contains("a.rs"));
+        assert!(sections[1].contains("b.rs"));
+    }
+
+    #[test]
+    fn summary_lists_status_and_counts() {
+        let changes = vec![
+            StagedChange { path: "_docs/a.md".into(), old_path: Some("a.md".into()), status: ChangeStatus::Renamed, additions: 0, deletions: 0 },
+            StagedChange { path: "b.ts".into(), old_path: None, status: ChangeStatus::Deleted, additions: 0, deletions: 12 },
+        ];
+        let out = change_summary(&changes);
+        assert!(out.contains("renamed a.md -> _docs/a.md (+0 -0)"), "got: {out}");
+        assert!(out.contains("deleted b.ts (+0 -12)"));
+    }
 }

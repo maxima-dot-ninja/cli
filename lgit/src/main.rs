@@ -99,8 +99,17 @@ async fn run_commit_flow(tag: Option<String>) -> Result<()> {
         return Ok(());
     }
 
+    // Paths the model is allowed to name when asked to show a diff
+    let staged_paths: Vec<String> = staged.iter().map(|c| c.path.clone()).collect();
+
+    // Survives diff trimming, so the model always knows the full scope
+    let summary = git::change_summary(&staged);
+
+    // Everything said in follow-up turns, so a later regenerate honours it
+    let mut history: Vec<String> = Vec::new();
+
     // Generate commit message with AI
-    let mut commit_msg = generate_commit_message(&cfg, &diff).await?;
+    let mut commit_msg = generate_commit_message(&cfg, &summary, &diff, &history).await?;
 
     // Interactive loop for user action
     loop {
@@ -211,8 +220,41 @@ async fn run_commit_flow(tag: Option<String>) -> Result<()> {
             ui::UserAction::Edit => {
                 commit_msg = ui::edit_message(&commit_msg)?;
             }
+            ui::UserAction::Ask => {
+                let question = ui::prompt_question()?;
+                if question.is_empty() {
+                    continue;
+                }
+                history.push(format!("Developer: {question}"));
+
+                let spinner = ui::create_spinner("Looking at the diff...");
+                let reply =
+                    ai::follow_up(&cfg, &diff, &commit_msg, &staged_paths, &history).await;
+                spinner.finish_and_clear();
+
+                match reply? {
+                    ai::FollowUp::Message(message) => {
+                        history.push("You: rewrote the commit message as asked.".to_string());
+                        commit_msg = message;
+                    }
+                    ai::FollowUp::Show { files, note } => {
+                        for path in &files {
+                            match git::get_file_diff(path) {
+                                Ok(file_diff) => ui::print_file_diff(path, &file_diff),
+                                Err(e) => {
+                                    ui::print_warning(&format!("Could not diff {path}: {e}"))
+                                }
+                            }
+                        }
+                        if !note.is_empty() {
+                            ui::print_note(&note);
+                        }
+                        history.push(format!("You: {note}"));
+                    }
+                }
+            }
             ui::UserAction::Regenerate => {
-                commit_msg = generate_commit_message(&cfg, &diff).await?;
+                commit_msg = generate_commit_message(&cfg, &summary, &diff, &history).await?;
             }
             ui::UserAction::Cancel => {
                 ui::print_info("Cancelled.");
@@ -224,10 +266,15 @@ async fn run_commit_flow(tag: Option<String>) -> Result<()> {
     Ok(())
 }
 
-async fn generate_commit_message(cfg: &config::Config, diff: &str) -> Result<String> {
+async fn generate_commit_message(
+    cfg: &config::Config,
+    summary: &str,
+    diff: &str,
+    history: &[String],
+) -> Result<String> {
     let spinner = ui::create_spinner("Generating commit message...");
 
-    let result = ai::generate_commit(cfg, diff).await;
+    let result = ai::generate_commit(cfg, summary, diff, history).await;
 
     spinner.finish_and_clear();
 
