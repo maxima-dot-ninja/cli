@@ -55,7 +55,7 @@ pub async fn generate(config: &AiConfig, key: &str, system: &str, prompt: &str) 
     let request = Request {
         system_instruction: Content { parts: vec![Part { text: system.into() }] },
         contents: vec![Content { parts: vec![Part { text: prompt.into() }] }],
-        generation_config: GenerationConfig { max_output_tokens: 1024 },
+        generation_config: GenerationConfig { max_output_tokens: 4096 },
     };
 
     let response = reqwest::Client::new()

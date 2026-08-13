@@ -39,7 +39,7 @@ pub async fn generate(config: &AiConfig, key: &str, system: &str, prompt: &str) 
             Message { role: "system".into(), content: system.into() },
             Message { role: "user".into(), content: prompt.into() },
         ],
-        max_completion_tokens: 1024,
+        max_completion_tokens: 4096,
     };
 
     let response = reqwest::Client::new()

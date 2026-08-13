@@ -94,7 +94,7 @@ fn resolve_key(ai: &AiConfig) -> String {
     std::env::var(var).unwrap_or_default()
 }
 
-async fn dispatch(ai: &AiConfig, system: &str, prompt: &str) -> Result<String> {
+pub async fn dispatch(ai: &AiConfig, system: &str, prompt: &str) -> Result<String> {
     let key = resolve_key(ai);
     match ai.provider.as_str() {
         "anthropic" => anthropic::generate(ai, &key, system, prompt).await,
