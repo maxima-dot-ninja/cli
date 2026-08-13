@@ -11,6 +11,7 @@ AI-powered git commits. Stage your changes, let AI write the message.
 ## Features
 
 - **AI-generated commit messages** — Analyzes your diff and writes conventional commit messages
+- **Ask follow-up questions** — Ask about the change in plain English and get the real diff back, or tell it how to reword the message
 - **Multiple AI providers** — Anthropic, OpenAI, Google Gemini, or local Ollama
 - **GPG signing** — Sign commits with your GPG key, or commit unsigned
 - **Auto push with smart retry** — Automatically pulls and retries if remote has new commits
@@ -20,7 +21,7 @@ AI-powered git commits. Stage your changes, let AI write the message.
 
 ```bash
 # Clone and install
-git clone https://github.com/yourusername/lgit.git
+git clone https://github.com/a32ninja/lgit.git
 cd lgit
 cargo install --path .
 ```
@@ -77,6 +78,7 @@ lgit
 ? What would you like to do?
 ❯ ✓ Accept and commit
   ✎ Edit message
+  ? Ask about the changes
   ↻ Regenerate
   ✕ Cancel
 
@@ -93,6 +95,48 @@ lgit
   https://github.com/user/repo/compare/feature-branch?expand=1
 ```
 
+### Asking about the change
+
+Pick **? Ask about the changes** and type a question in plain English. lgit does one
+of two things depending on what you asked.
+
+**Ask about the code, get the real diff.** Not a summary — actual `git diff --cached`
+output for whichever files hold what you asked about:
+
+```
+Ask: tell me about the new daily breakdown endpoint
+
+📄 src/api/stats.rs
+
+  @@ -10,6 +10,18 @@
+  +pub async fn daily_breakdown(range: DateRange) -> Result<Vec<DailyStat>> {
+  +    let rows = db::query_daily(range).await?;
+  +    Ok(rows.into_iter().map(DailyStat::from).collect())
+  +}
+
+  This adds the daily_breakdown handler, which queries per-day rows and
+  maps them into DailyStat.
+```
+
+**Say how to change the message, get it rewritten:**
+
+```
+Ask: call this a fix, not a feat, and mention the migration
+
+📝 Suggested commit:
+
+  fix(api): correct daily breakdown totals and add migration
+```
+
+Questions stack up, and **Regenerate honours everything you've said** — so you can
+narrow the message over a few turns instead of editing it by hand.
+
+Two things worth knowing:
+
+- It can only show files that are actually staged. Invented paths are dropped rather
+  than guessed at, so it will never show you a diff for a file that isn't in the commit.
+- A bare file name works — `stats.rs` resolves to `src/api/stats.rs`.
+
 ### Commands
 
 ```bash
@@ -105,7 +149,14 @@ lgit --gpginfo  # Show GPG key setup instructions
 
 ## Configuration
 
-Config is stored at `~/.config/lgit/config.toml`:
+Config lives in your platform's config directory:
+
+| Platform | Path |
+|---|---|
+| macOS | `~/Library/Application Support/lgit/config.toml` |
+| Linux | `~/.config/lgit/config.toml` (or `$XDG_CONFIG_HOME/lgit/`) |
+
+Run `lgit --config` to print the exact path on your machine.
 
 ```toml
 [provider]
