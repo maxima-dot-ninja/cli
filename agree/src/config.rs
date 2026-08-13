@@ -16,7 +16,7 @@ pub struct Config {
     pub ai: AiConfig,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AiConfig {
     /// anthropic | openai | gemini | ollama
     #[serde(default)]
@@ -27,11 +27,6 @@ pub struct AiConfig {
     pub api_key: String,
 }
 
-impl Default for AiConfig {
-    fn default() -> Self {
-        Self { provider: String::new(), model: String::new(), api_key: String::new() }
-    }
-}
 
 fn default_currency() -> String {
     "USD".to_string()

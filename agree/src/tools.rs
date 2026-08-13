@@ -39,6 +39,17 @@ const fn read(
 
 pub const TOOLS: &[Tool] = &[
     // ── Invoices ────────────────────────────────────────────────────────────
+    // Handled by the interactive form rather than a plain HTTP call: it resolves
+    // the payee, converts dollars to cents and pins the repeat to a weekday.
+    Tool {
+        name: "create_invoice",
+        description: "Create an invoice, one-off or recurring. Opens a short form so the user can confirm the payee, amount and dates.",
+        args: "amount (as the user said it, e.g. \"5000\" or \"$1.5k\"), payee (name as spoken), repeat_unit (week|month), repeat_frequency, due_date (YYYY-MM-DD), memo",
+        method: Method::Post,
+        path: "/api/v1/invoices",
+        body_key: Some("invoice"),
+        mutates: true,
+    },
     read(
         "list_invoices",
         "List invoices. Filter by status, customer name, amount or date range.",
@@ -257,9 +268,9 @@ fn split_path(tool: &Tool, args: &Map<String, Value>) -> Result<(String, Map<Str
         let key = path[start + 1..end].to_string();
         let value = rest
             .remove(&key)
-            .and_then(|v| match v {
-                Value::String(s) => Some(s),
-                other => Some(other.to_string().trim_matches('"').to_string()),
+            .map(|v| match v {
+                Value::String(s) => s,
+                other => other.to_string().trim_matches('"').to_string(),
             })
             .unwrap_or_default();
 

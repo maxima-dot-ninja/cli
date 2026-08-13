@@ -243,6 +243,8 @@ pub struct Template {
     pub name: Option<String>,
 }
 
+/// Read back from the webhook tools, which return raw JSON today.
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WebhookEndpoint {
     pub id: String,

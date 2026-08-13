@@ -60,6 +60,7 @@ pub struct Client {
 /// One page of a list response, plus whatever paging metadata came back.
 pub struct Page<T> {
     pub items: Vec<T>,
+    #[allow(dead_code)]
     pub page: u32,
     pub had_full_page: bool,
 }

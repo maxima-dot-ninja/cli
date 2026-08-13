@@ -171,6 +171,23 @@ fn dump_raw<T: Serialize>(rows: &[T]) -> Result<()> {
     dump(rows)
 }
 
+pub fn spinner(message: &str) -> indicatif::ProgressBar {
+    let bar = indicatif::ProgressBar::new_spinner();
+    bar.set_style(
+        indicatif::ProgressStyle::default_spinner()
+            .tick_chars("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏")
+            .template("{spinner:.cyan} {msg}")
+            .unwrap(),
+    );
+    bar.set_message(message.to_string());
+    bar.enable_steady_tick(std::time::Duration::from_millis(80));
+    bar
+}
+
+pub fn success(message: &str) {
+    println!("\n  {} {}", style("✓").green().bold(), message);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -187,21 +204,4 @@ mod tests {
         assert_eq!(day(&Some("2026-07-08T00:00:00Z".into())), "2026-07-08");
         assert_eq!(day(&None), "—");
     }
-}
-
-pub fn spinner(message: &str) -> indicatif::ProgressBar {
-    let bar = indicatif::ProgressBar::new_spinner();
-    bar.set_style(
-        indicatif::ProgressStyle::default_spinner()
-            .tick_chars("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏")
-            .template("{spinner:.cyan} {msg}")
-            .unwrap(),
-    );
-    bar.set_message(message.to_string());
-    bar.enable_steady_tick(std::time::Duration::from_millis(80));
-    bar
-}
-
-pub fn success(message: &str) {
-    println!("\n  {} {}", style("✓").green().bold(), message);
 }
