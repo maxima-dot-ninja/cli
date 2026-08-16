@@ -63,6 +63,14 @@ def build():
                     spec["servers"].append(server)
         print(f"  {os.path.basename(url)}", file=sys.stderr)
 
+    # Mercury's docs illustrate the auth header with a real-looking token. It is
+    # only an example in a description field, but it matches GitHub's secret
+    # scanner exactly, which blocks the push of any repo that vendors this file.
+    redacted = re.subn(r"mercury_(production|sandbox)_[A-Za-z0-9_]{6,}", "YOUR_TOKEN", json.dumps(spec))
+    spec = json.loads(redacted[0])
+    if redacted[1]:
+        print(f"redacted {redacted[1]} example token(s)", file=sys.stderr)
+
     operations = sum(
         1
         for methods in spec["paths"].values()

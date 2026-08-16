@@ -19,9 +19,9 @@ AI-powered git commits. Stage your changes, let AI write the message.
 
 ## Installation
 
+lgit lives in the [_cli](../README.md) repo:
+
 ```bash
-# Clone and install
-git clone https://github.com/a32ninja/lgit.git
 cd lgit
 cargo install --path .
 ```
@@ -140,11 +140,13 @@ Two things worth knowing:
 ### Commands
 
 ```bash
-lgit            # Run the commit flow
-lgit --setup    # Re-run setup wizard
-lgit --model    # Change AI model
-lgit --config   # Show current configuration
-lgit --gpginfo  # Show GPG key setup instructions
+lgit                  # Run the commit flow
+lgit --tag v1.0.0     # Commit, then tag it
+lgit --setup          # Re-run setup wizard
+lgit --model          # Change AI model (can switch providers)
+lgit --key            # Manage API keys
+lgit --config         # Show current configuration
+lgit --gpginfo        # Show GPG key setup instructions
 ```
 
 ## Configuration
@@ -205,12 +207,14 @@ color = true
 
 ## Supported Providers
 
-| Provider | Models | API Key Env Var |
+| Provider | Models (first is the default) | API Key Env Var |
 |----------|--------|-----------------|
-| Anthropic | Claude Sonnet 4, Opus 4, Haiku 3 | `ANTHROPIC_API_KEY` |
-| OpenAI | GPT-5.2, GPT-5.1, GPT-5 Mini, GPT-4.1, GPT-4o | `OPENAI_API_KEY` |
-| Google Gemini | Gemini 2.5 Pro, 2.5 Flash, 2.0 Flash | `GOOGLE_API_KEY` |
+| Anthropic | Claude Sonnet 4, Opus 4, Haiku 4.5 | `ANTHROPIC_API_KEY` |
+| OpenAI | GPT-5.2, 5.2 Pro, 5, 5 Mini, 5 Nano, 4.1 | `OPENAI_API_KEY` |
+| Google Gemini | Gemini 3.1 Pro, 3 Pro, 3 Flash, 2.5 Flash, 2.5 Flash-Lite | `GOOGLE_API_KEY` |
 | Ollama | Any installed model | — |
+
+`lgit --model` lists exactly these and switches provider at the same time.
 
 ## Smart Push
 
