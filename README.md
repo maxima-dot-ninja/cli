@@ -1,15 +1,34 @@
 # _cli
 
-Personal command-line tools. One repo, four independent tools, no shared build.
+Personal command-line tools. One repo, five independent tools, no shared build.
 
 | Tool | What it does | Stack |
 |---|---|---|
+| [**merc**](merc/README.md) | The whole Mercury banking API | Rust |
 | [**agree**](agree/README.md) | Invoices, agreements and contacts on the Agree API | Rust |
 | [**pocket**](pocket/README.md) | Export and search recorded conversations | Bun / TypeScript |
 | [**lgit**](lgit/README.md) | AI-written git commit messages | Rust |
 | **ccx** | Claude Code launcher with auto-named sessions | Bash |
 
 Each tool stands alone — install only what you want.
+
+## merc
+
+Every one of the [Mercury API](https://docs.mercury.com/reference)'s 72 operations —
+accounts, transactions, payments, cards, recipients, treasury, invoicing, webhooks.
+Deterministic: no AI anywhere, the same input always makes the same request.
+
+```sh
+merc accounts                          # balances
+merc transactions --status=pending     # any operation as <group> <command>
+merc call getAccountCards accountId=…  # or by Mercury's own operation id
+merc send                              # guided payment, with a confirmation
+```
+
+The commands are **generated from Mercury's OpenAPI spec at build time**, so coverage is
+a fact rather than a promise, and a new Mercury endpoint becomes a working command by
+refetching the spec and rebuilding. Amounts are parsed into integer cents and never
+touch a float. Full docs: [merc/README.md](merc/README.md).
 
 ## agree
 
@@ -91,6 +110,9 @@ cargo install --path lgit
 
 # agree — needs rust 1.70+
 cargo install --path agree
+
+# merc — needs rust 1.70+
+cargo install --path merc
 ```
 
 Symlinks rather than copies, so edits to the source are live immediately.
@@ -107,6 +129,7 @@ touch ~/.config/secrets.env && chmod 600 ~/.config/secrets.env
 Put your keys in it:
 
 ```sh
+export MERCURY_API_KEY="secret-token:..."  # merc
 export AGREE_API_KEY="agr_..."        # agree
 export POCKET_APP_KEY="pk_..."        # pocket
 export ANTHROPIC_API_KEY="sk-ant-..." # lgit, agree (AI features)
@@ -127,6 +150,7 @@ tool's own config file**, so this one file overrides everything.
 
 | Tool | Environment variable | Config file fallback |
 |---|---|---|
+| **merc** | `MERCURY_API_KEY` | `~/.config/merc/config.toml` |
 | **agree** | `AGREE_API_KEY` | `~/.config/agree/config.toml` |
 | **pocket** | `POCKET_APP_KEY` | `~/.config/pocket/key` |
 | **lgit** | provider's own var (`ANTHROPIC_API_KEY`, …) | `~/.config/lgit/config.toml` |
