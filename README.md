@@ -1,16 +1,38 @@
 # _cli
 
-Personal command-line tools. One repo, five independent tools, no shared build.
+Personal command-line tools. One repo, six independent tools, no shared build.
 
-| Tool | What it does | Stack |
-|---|---|---|
-| [**merc**](merc/README.md) | The whole Mercury banking API | Rust |
-| [**agree**](agree/README.md) | Invoices, agreements and contacts on the Agree API | Rust |
-| [**pocket**](pocket/README.md) | Export and search recorded conversations | Bun / TypeScript |
-| [**lgit**](lgit/README.md) | AI-written git commit messages | Rust |
-| **ccx** | Claude Code launcher with auto-named sessions | Bash |
+| Tool | What it does | Stack | Skill |
+|---|---|---|---|
+| [**merc**](merc/README.md) | The whole Mercury banking API | Rust | ✅ |
+| [**agree**](agree/README.md) | Invoices, agreements and contacts on the Agree API | Rust | ✅ |
+| [**vgoog**](vgoog/README.md) | All of Google Workspace — Gmail, Calendar, Drive, Sheets, Docs | Rust | ✅ |
+| [**pocket**](pocket/README.md) | Export and search recorded conversations | Bun / TypeScript | ✅ |
+| [**lgit**](lgit/README.md) | AI-written git commit messages | Rust | — |
+| **ccx** | Claude Code launcher with auto-named sessions | Bash | — |
 
 Each tool stands alone — install only what you want.
+
+## Skills
+
+A tool with a `SKILL.md` beside it is also an **agent skill**. One file, two readers:
+
+- **[vaulty](https://github.com/…/vaulty)** parses the YAML frontmatter — tool names, JSON-Schema
+  inputs and argv templates — and mounts them as tools. `vaulty skills add <tool>`. No restart.
+- **Claude Code** reads the same file's `name` + `description` and renders the markdown body.
+  `ln -s "$PWD/<tool>" ~/.claude/skills/<tool>`.
+
+```
+<tool>/
+  src/          the CLI — you run it directly, as always
+  SKILL.md      frontmatter = the machine contract, body = the prose
+  README.md     for humans
+```
+
+Writing one: the format is documented in vaulty at `src/core/organs/SKILLS_GUIDE.md`, and
+`vaulty skills check <tool>` reports every problem in a manifest at once.
+
+**Nothing about a skill changes how the tool works in a terminal.** The manifest is additive.
 
 ## merc
 
@@ -113,6 +135,9 @@ cargo install --path agree
 
 # merc — needs rust 1.70+
 cargo install --path merc
+
+# vgoog — needs rust 1.70+
+cargo install --path vgoog
 ```
 
 Symlinks rather than copies, so edits to the source are live immediately.

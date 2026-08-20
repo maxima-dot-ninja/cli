@@ -1,0 +1,46 @@
+[package]
+name = "vgoog"
+version = "0.1.0"
+edition = "2021"
+description = "Blazing fast TUI for managing Google Workspace services"
+
+[dependencies]
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# HTTP
+reqwest = { version = "0.12", features = ["json", "rustls-tls", "multipart"], default-features = false }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+
+# TUI
+ratatui = "0.29"
+crossterm = "0.28"
+tui-textarea = "0.7"
+
+# Error handling
+anyhow = "1"
+thiserror = "2"
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# Utilities
+chrono = { version = "0.4", features = ["serde"] }
+base64 = "0.22"
+urlencoding = "2"
+dirs = "6"
+arboard = "3"
+mime_guess = "2"
+uuid = { version = "1", features = ["v4"] }
+textwrap = "0.16"
+unicode-width = "0.2"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
