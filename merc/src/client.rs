@@ -35,6 +35,8 @@ pub enum ApiError {
     /// Carries what is known about the token, because "unauthorized" alone
     /// sends you looking in the wrong place.
     Unauthorized(String),
+    /// Mercury's allow-list, reported as a 401 that looks exactly like a bad token.
+    IpNotWhitelisted(String),
     Forbidden(String),
     NotFound(String),
     /// 400/422 — Mercury explains these well, so its own words are shown
@@ -51,6 +53,9 @@ impl std::fmt::Display for ApiError {
         match self {
             ApiError::Unauthorized(advice) => {
                 write!(f, "Mercury rejected the token.\n{advice}")
+            }
+            ApiError::IpNotWhitelisted(advice) => {
+                write!(f, "Mercury blocked this request by IP address, not by token.\n\n{advice}")
             }
             ApiError::Forbidden(message) => write!(
                 f,
@@ -191,7 +196,7 @@ impl Client {
         let mut request = self.http.request(method, &url).query(&query(op, args));
         request = match op.is_oauth() {
             true => request.basic_auth(&self.config.client_id, Some(&self.config.client_secret)),
-            false => request.bearer_auth(&self.config.api_key),
+            false => request.bearer_auth(self.config.key_for(op.mutates())),
         };
         request = match op.payload {
             Payload::None => request,
@@ -261,12 +266,21 @@ fn multipart(op: &'static Op, args: &Map<String, Value>) -> Result<reqwest::bloc
 
 fn classify(status: u16, body: &str, op: &'static Op, config: &Config) -> ApiError {
     let parsed: Value = serde_json::from_str(body).unwrap_or(Value::Null);
+    let field = |key: &str| parsed["errors"][key].as_str().or_else(|| parsed[key].as_str()).unwrap_or("");
     let message = ["message", "error", "errorCode"]
         .iter()
-        .find_map(|key| parsed["errors"][*key].as_str().or_else(|| parsed[*key].as_str()))
+        .map(|key| field(key))
+        .find(|value| !value.is_empty())
         .unwrap_or(body)
         .trim()
         .to_string();
+
+    // Mercury's own errorCode is read BEFORE the status, because it disagrees with it:
+    // a blocked IP arrives as a 401, indistinguishable from a dead token unless you look.
+    if field("errorCode") == "ipNotWhitelisted" {
+        let advice = crate::config::ip_advice(field("ip"), op.mutates(), !config.read_key.is_empty());
+        return ApiError::IpNotWhitelisted(advice);
+    }
 
     match status {
         401 => ApiError::Unauthorized(crate::config::token_advice(config)),
@@ -343,6 +357,23 @@ mod tests {
             other => panic!("expected Rejected, got {other:?}"),
         }
         assert!(classify(403, body, op, &config).to_string().contains("IP allow-listed"));
+    }
+
+    #[test]
+    fn a_blocked_ip_is_not_reported_as_a_bad_token() {
+        // Mercury sends this as a 401. Believing the status costs you a key rotation.
+        let op = find("accounts", "list").unwrap();
+        let body = r#"{"errors":{"errorCode":"ipNotWhitelisted","ip":"187.14.50.244","message":"not whitelisted"}}"#;
+        let told = classify(401, body, op, &Config::default()).to_string();
+        assert!(told.contains("by IP address, not by token"), "{told}");
+        assert!(told.contains("187.14.50.244"), "{told}");
+        assert!(told.contains("MERCURY_READ_KEY"), "a read has a permanent way out: {told}");
+
+        // A write cannot escape the allow-list, so it must not be offered one.
+        let write = find("accounts", "create-transaction").unwrap();
+        let told = classify(401, body, write, &Config::default()).to_string();
+        assert!(!told.contains("MERCURY_READ_KEY"), "{told}");
+        assert!(told.contains("no way around it"), "{told}");
     }
 
     #[test]

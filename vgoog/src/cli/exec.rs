@@ -3,6 +3,10 @@ use crate::error::{Result, VgoogError};
 use serde_json::Value;
 
 pub async fn execute(client: &GoogleClient, service: &str, action: &str, args: Value) -> Result<Value> {
+    // Google's field names in, ours out. Every service dispatches through here, so this is the one
+    // place it has to happen.
+    let args = super::args::normalize(args);
+
     match service {
         "gmail" => super::gmail::execute(client, action, args).await,
         "calendar" => super::calendar::execute(client, action, args).await,

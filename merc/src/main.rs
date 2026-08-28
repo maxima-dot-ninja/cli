@@ -464,10 +464,30 @@ fn show_config(config: &Config) -> Result<()> {
             false => format!("set ({} chars)", config.api_key.len()),
         }
     );
+    println!(
+        "  Read token  : {}",
+        match config.read_key.is_empty() {
+            true => "not set — reads use the API token".to_string(),
+            false => format!("set ({} chars), used for every read", config.read_key.len()),
+        }
+    );
     println!("  Operations  : {}\n", ops::OPS.len());
     if config.api_key.is_empty() {
         println!("{}\n", config::missing_key_help());
+        return Ok(());
     }
+
+    // Saying a token is "set" is not the same as saying it works, and every question
+    // this command exists to answer is really "why is Mercury saying no?".
+    let op = ops::find("accounts", "list").context("accounts list is missing from the catalogue")?;
+    match Client::new(config)?.run(op, &Map::new()) {
+        Ok(reply) => {
+            let count = reply.value["accounts"].as_array().map(|a| a.len()).unwrap_or_default();
+            view::success(&format!("Reaches Mercury — {count} accounts visible."));
+        }
+        Err(error) => view::warn(&format!("{error:#}")),
+    }
+    println!();
     Ok(())
 }
 

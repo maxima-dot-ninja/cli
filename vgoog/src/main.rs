@@ -9,7 +9,7 @@ mod error;
 mod ui;
 
 use crate::client::GoogleClient;
-use crate::config::{Account, AuthConfig, Config};
+use crate::config::{Account, AuthConfig, Config, DelegatedAccount, Strategy};
 use crate::ui::app::{App, Screen};
 use crate::ui::views::handlers;
 use crate::ui::views::render;
@@ -73,6 +73,7 @@ async fn first_time_setup() -> anyhow::Result<Config> {
         active_account: name.clone(),
         accounts: Default::default(),
         auth: None,
+        strategy: Strategy::default(),
     };
     config.add_account(name, account);
     config.save()?;
@@ -82,12 +83,24 @@ async fn first_time_setup() -> anyhow::Result<Config> {
 }
 
 // ── Add account flow ──
+//
+// Three ways in, offered as a menu rather than assumed. The wizard is the default path: running
+// `vgoog` with nothing configured lands here.
 
 async fn add_account_flow() -> anyhow::Result<(String, Account)> {
     let name = prompt("  Account name (e.g. work, personal): ")?;
     let label = prompt("  Display label (e.g. Work Gmail): ")?;
 
-    let auth = manual_token_flow()?;
+    println!("\n  How should this account authenticate?\n");
+    println!("    1  Sign in with Google        — opens a browser, catches the callback (recommended)");
+    println!("    2  Service account            — Workspace only, impersonates a user, no browser ever");
+    println!("    3  Paste tokens by hand       — when you already have them\n");
+
+    let (auth, service_account) = match prompt("  Choose [1]: ")?.as_str() {
+        "2" => service_account_flow()?,
+        "3" => (manual_token_flow()?, None),
+        _ => (browser_login_flow().await?, None),
+    };
 
     let account_name = if name.is_empty() {
         "default".to_string()
@@ -106,8 +119,101 @@ async fn add_account_flow() -> anyhow::Result<(String, Account)> {
         Account {
             label: account_label,
             auth,
+            service_account,
         },
     ))
+}
+
+// ── Sign in with Google ──
+
+async fn browser_login_flow() -> anyhow::Result<AuthConfig> {
+    println!("\n  ── Sign in with Google ──\n");
+    println!("  You need a Desktop OAuth client from:");
+    println!("  https://console.cloud.google.com/apis/credentials\n");
+    println!("  Application type must be \"Desktop app\". Nothing to configure beyond that —");
+    println!("  no redirect URIs to register, no OAuth Playground.\n");
+
+    let client_id = prompt("  Client ID: ")?;
+    let client_secret = prompt("  Client secret: ")?;
+    if client_id.is_empty() || client_secret.is_empty() {
+        anyhow::bail!("a client id and secret are required");
+    }
+
+    let scopes = auth::scopes::oauth_default();
+    println!("\n  Requesting {} scopes across {} services.", scopes.len(), auth::scopes::service_names().len() - 1);
+
+    let granted = auth::callback::login(&client_id, &client_secret, &scopes, |url| {
+        println!("\n  Opening your browser. If it does not appear, go here:\n");
+        println!("  {url}\n");
+        println!("  Waiting for you to finish…");
+    })
+    .await?;
+
+    println!("  Signed in.\n");
+
+    Ok(AuthConfig {
+        client_id,
+        client_secret,
+        access_token: granted.access_token,
+        refresh_token: granted.refresh_token,
+        token_expiry: granted.expiry,
+    })
+}
+
+// ── Service account (domain-wide delegation) ──
+
+fn service_account_flow() -> anyhow::Result<(AuthConfig, Option<DelegatedAccount>)> {
+    println!("\n  ── Service account ──\n");
+    println!("  Workspace only. Two things have to be true before this works:\n");
+    println!("    1. The service account has domain-wide delegation enabled, and you have its");
+    println!("       JSON key (Cloud console → IAM → Service Accounts → Keys → Add key).");
+    println!("    2. Its CLIENT ID is authorised in admin.google.com → Security → Access and");
+    println!("       data control → API controls → Domain-wide delegation, against these scopes.\n");
+
+    let scopes = auth::scopes::all();
+    println!("  Scopes to paste into the admin console:\n");
+    println!("  {}\n", scopes.join(" "));
+
+    let key_path = prompt("  Path to the JSON key file: ")?;
+    let expanded = shellexpand(&key_path);
+    let key_json = std::fs::read_to_string(&expanded)
+        .map_err(|error| anyhow::anyhow!("could not read {expanded}: {error}"))?;
+
+    // Parse before storing: a wrong file here fails at the first API call otherwise, hours later.
+    let key = auth::service_account::ServiceAccountKey::parse(&key_json)?;
+    println!("\n  Key belongs to: {}", key.client_email);
+    if !key.client_id.is_empty() {
+        println!("  Client ID for the admin console: {}", key.client_id);
+    }
+
+    let subject = prompt("\n  Workspace user to act as (e.g. you@yourdomain.com): ")?;
+    if subject.is_empty() {
+        anyhow::bail!("a user to impersonate is required — that is what delegation authorises");
+    }
+
+    Ok((
+        AuthConfig {
+            client_id: String::new(),
+            client_secret: String::new(),
+            access_token: String::new(),
+            refresh_token: String::new(),
+            token_expiry: chrono::Utc::now(),
+        },
+        Some(DelegatedAccount {
+            subject,
+            key_json,
+            scopes: scopes.iter().map(|s| s.to_string()).collect(),
+        }),
+    ))
+}
+
+/// `~` in a pasted path is the common case when the key came out of ~/Downloads.
+fn shellexpand(path: &str) -> String {
+    let path = path.trim().trim_matches('\'').trim_matches('"');
+    match path.strip_prefix("~/") {
+        Some(rest) => dirs::home_dir().map(|home| home.join(rest).display().to_string()).unwrap_or_else(|| path.to_string()),
+        None => path.to_string(),
+    }
 }
 
 // ── Manual Token Flow ──
@@ -466,6 +572,162 @@ async fn run_cli(command: cli::CliCommand) -> anyhow::Result<()> {
                     std::process::exit(1);
                 }
             }
+        }
+
+        cli::CliCommand::Scopes { all } => {
+            let scopes = if all { auth::scopes::all() } else { auth::scopes::oauth_default() };
+            println!("{}", scopes.join(" "));
+        }
+
+        cli::CliCommand::Login {
+            account,
+            client_id,
+            client_secret,
+            service_account,
+            subject,
+        } => {
+            let entry = match service_account {
+                Some(path) => {
+                    let subject = subject.ok_or_else(|| {
+                        anyhow::anyhow!("--subject is required with --service-account: delegation acts AS someone")
+                    })?;
+                    let key_json = std::fs::read_to_string(shellexpand(&path))?;
+                    let key = auth::service_account::ServiceAccountKey::parse(&key_json)?;
+                    eprintln!("  key belongs to {}", key.client_email);
+
+                    Account {
+                        label: format!("{subject} (delegated)"),
+                        auth: AuthConfig {
+                            client_id: String::new(),
+                            client_secret: String::new(),
+                            access_token: String::new(),
+                            refresh_token: String::new(),
+                            token_expiry: chrono::Utc::now(),
+                        },
+                        service_account: Some(DelegatedAccount {
+                            subject,
+                            key_json,
+                            scopes: auth::scopes::all().iter().map(|s| s.to_string()).collect(),
+                        }),
+                    }
+                }
+                None => {
+                    // Falling back to the environment is what makes this usable straight after
+                    // `vaulty secrets pull` — the credentials are already exported there.
+                    let client_id = client_id
+                        .or_else(|| std::env::var("VGOOG_CLIENT_ID").ok())
+                        .ok_or_else(|| anyhow::anyhow!("--client-id, or VGOOG_CLIENT_ID in the environment"))?;
+                    let client_secret = client_secret
+                        .or_else(|| std::env::var("VGOOG_CLIENT_SECRET").ok())
+                        .ok_or_else(|| anyhow::anyhow!("--client-secret, or VGOOG_CLIENT_SECRET in the environment"))?;
+
+                    let scopes = auth::scopes::oauth_default();
+                    let granted = auth::callback::login(&client_id, &client_secret, &scopes, |url| {
+                        eprintln!("  open this if your browser did not:\n  {url}");
+                    })
+                    .await?;
+
+                    Account {
+                        label: account.clone(),
+                        auth: AuthConfig {
+                            client_id,
+                            client_secret,
+                            access_token: granted.access_token,
+                            refresh_token: granted.refresh_token,
+                            token_expiry: granted.expiry,
+                        },
+                        service_account: None,
+                    }
+                }
+            };
+
+            let mut config = Config::load().unwrap_or_else(|_| Config {
+                active_account: account.clone(),
+                accounts: Default::default(),
+                auth: None,
+                strategy: Strategy::default(),
+            });
+            config.add_account(account.clone(), entry);
+            config.active_account = account.clone();
+            config.save()?;
+
+            println!("{}", serde_json::to_string(&serde_json::json!({ "ok": true, "account": account }))?);
+        }
+
+        cli::CliCommand::Strategy { kind } => {
+            let mut config = Config::load()?;
+            match kind {
+                None => println!("{}", config.strategy.label()),
+                Some(kind) => {
+                    let Some(parsed) = Strategy::parse(&kind) else {
+                        anyhow::bail!("unknown strategy '{kind}' — use auto, service_account or oauth");
+                    };
+                    config.strategy = parsed;
+                    config.save()?;
+                    println!("{}", parsed.label());
+                }
+            }
+        }
+
+        cli::CliCommand::Doctor => {
+            let mut report = serde_json::Map::new();
+            let config = Config::load();
+
+            match &config {
+                Err(error) => {
+                    report.insert("ok".into(), false.into());
+                    report.insert("error".into(), error.to_string().into());
+                }
+                Ok(config) => {
+                    let accounts: Vec<serde_json::Value> = config
+                        .accounts
+                        .iter()
+                        .map(|(name, account)| {
+                            serde_json::json!({
+                                "name": name,
+                                "label": account.label,
+                                "email": account.service_account.as_ref().map(|d| d.subject.clone()),
+                                "kind": if account.service_account.is_some() { "service_account" } else { "oauth" },
+                                "subject": account.service_account.as_ref().map(|d| d.subject.clone()),
+                                "usable": config::account_is_usable(account),
+                                "active": *name == config.active_account,
+                            })
+                        })
+                        .collect();
+                    report.insert("accounts".into(), accounts.into());
+                    report.insert("strategy".into(), config.strategy.label().into());
+
+                    // Which key is in play, and the client id to paste into the admin console.
+                    // Looked up once: every delegated account on this machine shares one key.
+                    let delegated = config.accounts.values().find_map(|account| account.service_account.as_ref());
+                    if let Some(delegated) = delegated {
+                        if let Ok(key) = auth::service_account::ServiceAccountKey::parse(&delegated.key_json) {
+                            report.insert(
+                                "service_account".into(),
+                                serde_json::json!({
+                                    "email": key.client_email,
+                                    "client_id": key.client_id,
+                                    "project": key.project_id,
+                                    "scopes": delegated.scopes.len(),
+                                }),
+                            );
+                        }
+                    }
+
+                    // The only check that means anything: can it actually reach Google right now?
+                    let reachable = match GoogleClient::new(config.clone()) {
+                        Err(error) => serde_json::json!({ "ok": false, "error": error.to_string() }),
+                        Ok(client) => match api::gmail::GmailApi::new(&client).get_profile().await {
+                            Ok(profile) => serde_json::json!({ "ok": true, "as": profile.get("emailAddress") }),
+                            Err(error) => serde_json::json!({ "ok": false, "error": error.to_string() }),
+                        },
+                    };
+                    report.insert("ok".into(), reachable.get("ok").cloned().unwrap_or(false.into()));
+                    report.insert("reachable".into(), reachable);
+                }
+            }
+
+            println!("{}", serde_json::to_string(&serde_json::Value::Object(report))?);
         }
     }
     Ok(())

@@ -20,6 +20,14 @@ pub struct Config {
     /// Mercury issues these with a `secret-token:` prefix; keep it.
     #[serde(default)]
     pub api_key: String,
+    /// Optional second token used for reads.
+    ///
+    /// Mercury forces an IP allow-list onto any token that can write, so the main
+    /// token stops working the moment you change network. A `Read Only` token has
+    /// no allow-list and works from anywhere, which covers every GET this tool
+    /// makes. Money still moves on `api_key`.
+    #[serde(default)]
+    pub read_key: String,
     /// Talk to the sandbox unless told otherwise
     #[serde(default)]
     pub sandbox: bool,
@@ -46,6 +54,15 @@ impl Config {
         match self.sandbox {
             true => "https://oauth2-sandbox.mercury.com",
             false => "https://oauth2.mercury.com",
+        }
+    }
+
+    /// The token a given operation should travel on: reads prefer the allow-list-free
+    /// read token, writes must use the real one.
+    pub fn key_for(&self, mutates: bool) -> &str {
+        match mutates || self.read_key.is_empty() {
+            true => &self.api_key,
+            false => &self.read_key,
         }
     }
 
@@ -80,6 +97,7 @@ pub fn load() -> Result<Config> {
     };
 
     config.api_key = config.api_key.trim().to_string();
+    config.read_key = config.read_key.trim().to_string();
     if !config.api_key.is_empty() {
         config.key_source = Source::File;
     }
@@ -87,6 +105,7 @@ pub fn load() -> Result<Config> {
     // The environment wins, so a key exported in the shell beats the file.
     for (variable, field) in [
         ("MERCURY_API_KEY", &mut config.api_key),
+        ("MERCURY_READ_KEY", &mut config.read_key),
         ("MERCURY_CLIENT_ID", &mut config.client_id),
         ("MERCURY_CLIENT_SECRET", &mut config.client_secret),
     ] {
@@ -96,6 +115,7 @@ pub fn load() -> Result<Config> {
             }
         }
     }
+    config.read_key = config.read_key.trim().to_string();
     if std::env::var("MERCURY_API_KEY").is_ok_and(|value| !value.trim().is_empty()) {
         config.api_key = config.api_key.trim().to_string();
         config.key_source = Source::Environment;
@@ -153,6 +173,49 @@ pub fn token_advice(config: &Config) -> String {
                 .into(),
         );
     }
+    lines.join("\n")
+}
+
+/// What to do when Mercury blocks the IP rather than the token.
+///
+/// Mercury reports this as a 401, which reads as "bad token" and sends you rotating a
+/// key that was never wrong. It is worth spelling out both exits, because one of them
+/// removes the problem permanently instead of postponing it to the next network.
+pub fn ip_advice(ip: &str, mutates: bool, has_read_key: bool) -> String {
+    let seen = match ip.is_empty() {
+        true => "This machine's IP".to_string(),
+        false => format!("This machine's IP ({ip})"),
+    };
+    let mut lines =
+        vec![format!("{seen} is not on this token's allow-list. The token itself is fine."), String::new()];
+
+    lines.push("Add it: mercury.com → Settings → API Tokens → this token → IP allow-list.".into());
+
+    if mutates {
+        lines.push(String::new());
+        lines.push(
+            "There is no way around it for this command — Mercury requires an allow-list on \
+             any token that can write."
+                .into(),
+        );
+        return lines.join("\n");
+    }
+
+    if has_read_key {
+        lines.push(String::new());
+        lines.push(
+            "MERCURY_READ_KEY is set but was not used here, so it is a write-scoped token. \
+             A true `Read Only` token is the one with no allow-list."
+                .into(),
+        );
+        return lines.join("\n");
+    }
+
+    lines.push(String::new());
+    lines.push("Or stop needing one. This was a read, and a `Read Only` token has no allow-list".into());
+    lines.push("at all — it works from any network. Create one alongside the token you have:".into());
+    lines.push("  export MERCURY_READ_KEY=\"secret-token:...\"   (in ~/.config/secrets.env)".into());
+    lines.push("merc then reads on that token and keeps the current one for moving money.".into());
     lines.join("\n")
 }
 

@@ -1,4 +1,4 @@
-use crate::auth::refresh_token_if_needed;
+use crate::auth::ensure_token;
 use crate::config::{Config, SingleAccountConfig};
 use crate::error::{Result, VgoogError};
 use reqwest::{Client, Method, Response};
@@ -82,7 +82,7 @@ impl GoogleClient {
 
     async fn ensure_token(&self) -> Result<String> {
         let mut config = self.account_config.lock().await;
-        refresh_token_if_needed(&mut config).await?;
+        ensure_token(&mut config).await?;
         Ok(config.auth.access_token.clone())
     }
 

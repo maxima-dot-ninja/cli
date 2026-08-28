@@ -141,27 +141,92 @@ vgoog automatically refreshes your access token when it expires (with a 2-minute
 6. Note down your Client ID and Client Secret
 7. Use the [OAuth Playground](https://developers.google.com/oauthplayground/) to obtain access + refresh tokens with the scopes below
 
+### Authentication
+
+Three ways in. `vgoog` with nothing configured runs the wizard and offers all three.
+
+**1. Sign in with Google (recommended)**
+
+```bash
+vgoog login
+```
+
+Opens a browser, catches the redirect on a loopback port, exchanges the code itself. Create a
+**Desktop app** OAuth client in the [Cloud console](https://console.cloud.google.com/apis/credentials)
+and that is the whole setup — no redirect URIs to register, no OAuth Playground.
+
+Credentials can also come from the environment, which is what makes this work straight after
+`vaulty secrets pull`:
+
+```bash
+vgoog login              # reads VGOOG_CLIENT_ID / VGOOG_CLIENT_SECRET
+vgoog login --client-id ... --client-secret ...
+```
+
+**2. Service account (Workspace only, deepest access)**
+
+```bash
+vgoog login --service-account ~/Downloads/key.json --subject you@yourdomain.com
+```
+
+No browser, no refresh token, works headless and in CI, and reaches Workspace-admin surfaces that
+user consent cannot. Requires two things first:
+
+- the service account has **domain-wide delegation** enabled, and you have its JSON key
+- its **client id** is authorised in admin.google.com → Security → Access and data control →
+  API controls → Domain-wide delegation, against the scopes below
+
+> **Workspace access is not GCP IAM.** Giving the service account an IAM role in the Cloud console
+> grants it nothing in Gmail, Drive or Calendar — those permissions live in the Workspace admin
+> console and are granted separately. There are two ways to grant them:
+>
+> | | Direct sharing | Domain-wide delegation |
+> |---|---|---|
+> | How | Share one resource with the service account's email as Editor | Authorise its client id against a scope list |
+> | Needs | Nothing special | A Workspace **Super Admin** |
+> | Reaches | That one Drive folder / calendar | Every service, as any user in the domain |
+> | Gmail | **No** — a mailbox cannot be shared with a robot | Yes |
+>
+> `vgoog` uses delegation, because Gmail is the point.
+
+**3. Paste tokens by hand** — offered by the wizard when you already have them.
+
+### Restoring from the vault
+
+`vgoog` rebuilds itself from `~/.config/secrets.env` when it has no usable config of its own —
+written by `vaulty secrets pull`. Either credential kind restores:
+
+```
+VGOOG_SERVICE_ACCOUNT_KEY   the key file, minified to one line
+VGOOG_SUBJECTS              comma-separated addresses — ONE ACCOUNT EACH, first is the default
+```
+
+or, for OAuth:
+
+```
+VGOOG_CLIENT_ID  VGOOG_CLIENT_SECRET  VGOOG_REFRESH_TOKEN
+```
+
+A delegated key wins when both are present. Nothing to run: the next `vgoog` command picks it up
+and writes its own config.
+
 ### Required Scopes
 
-Request these scopes when generating tokens:
+`vgoog scopes` prints them, ready to paste:
 
+```bash
+vgoog scopes         # the 15 an OAuth login requests
+vgoog scopes --all   # 17, adding the Workspace-admin scopes a delegated key can use
 ```
-https://www.googleapis.com/auth/gmail.modify
-https://www.googleapis.com/auth/gmail.compose
-https://www.googleapis.com/auth/gmail.settings.basic
-https://www.googleapis.com/auth/gmail.settings.sharing
-https://www.googleapis.com/auth/calendar
-https://www.googleapis.com/auth/drive
-https://www.googleapis.com/auth/spreadsheets
-https://www.googleapis.com/auth/documents
-https://www.googleapis.com/auth/presentations
-https://www.googleapis.com/auth/forms.body
-https://www.googleapis.com/auth/forms.responses.readonly
-https://www.googleapis.com/auth/tasks
-https://www.googleapis.com/auth/contacts
-https://www.googleapis.com/auth/script.projects
-https://www.googleapis.com/auth/script.processes
+
+### Checking it works
+
+```bash
+vgoog doctor
 ```
+
+Reports every account, which kind of credential it holds, whether it is usable, and — the only
+check that means anything — whether it can actually reach Google right now.
 
 ---
 

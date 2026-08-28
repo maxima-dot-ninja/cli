@@ -36,6 +36,13 @@ pub async fn execute(client: &GoogleClient, action: &str, args: Value) -> Result
         "modify_message" => {
             let add = str_array(&args, "add_labels");
             let remove = str_array(&args, "remove_labels");
+            // Gmail answers this with "no label updates were provided", which reads like a
+            // permissions problem and is not one. Say what was actually missing.
+            if add.is_empty() && remove.is_empty() {
+                return Err(VgoogError::Other(
+                    "modify_message needs add_labels or remove_labels (arrays of label IDs; addLabelIds / removeLabelIds also accepted)".into(),
+                ));
+            }
             let add_refs: Vec<&str> = add.iter().map(|s| s.as_str()).collect();
             let remove_refs: Vec<&str> = remove.iter().map(|s| s.as_str()).collect();
             api.modify_message(str_field(&args, "id"), &add_refs, &remove_refs).await
@@ -44,6 +51,11 @@ pub async fn execute(client: &GoogleClient, action: &str, args: Value) -> Result
             let ids = str_array(&args, "ids");
             let add = str_array(&args, "add_labels");
             let remove = str_array(&args, "remove_labels");
+            if add.is_empty() && remove.is_empty() {
+                return Err(VgoogError::Other(
+                    "batch_modify_messages needs add_labels or remove_labels (arrays of label IDs; addLabelIds / removeLabelIds also accepted)".into(),
+                ));
+            }
             let id_refs: Vec<&str> = ids.iter().map(|s| s.as_str()).collect();
             let add_refs: Vec<&str> = add.iter().map(|s| s.as_str()).collect();
             let remove_refs: Vec<&str> = remove.iter().map(|s| s.as_str()).collect();
@@ -63,6 +75,11 @@ pub async fn execute(client: &GoogleClient, action: &str, args: Value) -> Result
         "modify_thread" => {
             let add = str_array(&args, "add_labels");
             let remove = str_array(&args, "remove_labels");
+            if add.is_empty() && remove.is_empty() {
+                return Err(VgoogError::Other(
+                    "modify_thread needs add_labels or remove_labels (arrays of label IDs; addLabelIds / removeLabelIds also accepted)".into(),
+                ));
+            }
             let add_refs: Vec<&str> = add.iter().map(|s| s.as_str()).collect();
             let remove_refs: Vec<&str> = remove.iter().map(|s| s.as_str()).collect();
             api.modify_thread(str_field(&args, "id"), &add_refs, &remove_refs).await

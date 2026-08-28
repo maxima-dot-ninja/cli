@@ -23,7 +23,7 @@ tools:
       Run one Mercury operation. Pass `group` and `command` exactly as bank_operations lists them
       ("accounts" + "list", "cards" + "freeze", "accounts" + "list-transactions"), and that
       operation's arguments in `args`, named as Mercury names them. Reading is free. ANYTHING THAT
-      MOVES MONEY or changes data needs confirm true, and you may only set that when the owner has
+      MOVES MONEY, or sends something to another person, needs confirm true, and you may only set that when the owner has
       just told you to do this specific thing — never on your own initiative, never to retry past a
       refusal. Amounts are decimal dollars, not cents. `all` follows every page of a list;
       `sandbox` uses the test bank instead of real money.
@@ -101,3 +101,27 @@ bank  group=cards         command=get-cards          args={ "accountId": "…" }
   operation as safe to run without asking.
 - `all: true` on a long list can return a lot of output. Prefer a filter and a limit first.
 - A confirmation failure is not a bug — see the hint the tool returns.
+
+## When Mercury says no
+
+Read what it actually said before you report anything. Two failures look identical from a distance
+and have nothing to do with each other:
+
+- **"blocked this request by IP address, not by token"** — the token is fine and the network is
+  wrong. Nothing to rotate, nothing to re-source. Mercury forces an IP allow-list onto any token
+  that can write, so this happens whenever the owner changes network. The tool prints the current
+  IP and the two ways out; pass them on rather than paraphrasing.
+- **"rejected the token"** — the token itself. The tool already says where it came from and what is
+  wrong with it.
+
+`merc config` runs a live read and prints whichever of these applies. Reach for it first; it is the
+diagnosis, not a guess at one.
+
+**A read that fails on the allow-list is a permanent fix, not a retry.** A Mercury `Read Only` token
+carries no allow-list and works from any network. If `MERCURY_READ_KEY` is unset, say so plainly:
+one token created once ends this class of failure for good, and `merc` will use it for every read
+while money keeps moving on the main token.
+
+**Never leave the question unanswered because the bank is unreachable.** A payment that left this
+account left a trail somewhere else — a receipt or a confirmation email, an invoice in `agree`. Go
+and get it, then say which source the number came from.

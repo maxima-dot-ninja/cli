@@ -21,16 +21,19 @@ tools:
     description: >
       Run one Agree operation. Pass `op` as billing_operations lists it (list_invoices,
       get_invoice, mark_invoice_paid) and that operation's arguments in `args`; the reply is JSON.
-      Reading is free. ANYTHING THAT CREATES, CHANGES OR DELETES needs confirm true, and only when
-      the owner has just asked for that specific change. AMOUNTS ARE INTEGER CENTS — $150.00 is
+      Reading is free, and so is anything that stays inside his own account — drafting an invoice,
+      editing one, adding a contact, renaming a template. Do those and report them. `confirm` is
+      for the two things that cannot be taken back: anything that REACHES A CUSTOMER (sending or
+      issuing an invoice, emailing an agreement) and anything that DELETES. Those need him to have
+      just asked for that specific action. AMOUNTS ARE INTEGER CENTS — $150.00 is
       15000, and getting that wrong is a 100x billing error. Contacts cannot be searched by name,
       only by email or company.
     argv: [call, "{{op}}", "{{@pairs:args}}", "{{confirm?:--yes}}"]
     timeout_ms: 60000
     error_hint: >
-      If this failed asking for confirmation, the operation changes data and there is nobody at
-      this keyboard to answer. Re-run with confirm true — only after the owner has said yes to this
-      exact change.
+      If this failed asking for confirmation, the operation either reaches a customer or deletes
+      something. Re-run with confirm true only after the owner has said yes to this exact action —
+      not to the general topic.
     input:
       type: object
       required: [op]
@@ -84,3 +87,12 @@ billing  op=get_invoice    args={ "id": "…" }
 - Operations tagged `[CHANGES DATA]` in the listing need `confirm: true`.
 - An invoice that has been sent is visible to the customer. Fix a mistake by talking to the owner,
   not by quietly issuing a correction.
+
+## Cross-check against the bank
+
+An invoice here records what was AGREED. It is not proof that money moved. "Paid" in Agree and a
+matching credit in Mercury are two different claims, and only the second one is cash.
+
+When either question comes up — was this paid, how much came in, what is outstanding — check both
+and say which one you read. Where they disagree, say so plainly rather than picking the friendlier
+number; a mismatch between the ledger and the bank is the most useful thing you can surface.

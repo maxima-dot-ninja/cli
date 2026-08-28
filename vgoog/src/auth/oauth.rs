@@ -1,7 +1,29 @@
-use crate::config::SingleAccountConfig;
+use super::service_account::{fetch_token, ServiceAccountKey};
+use crate::config::{DelegatedAccount, SingleAccountConfig};
 use crate::error::{Result, VgoogError};
 use chrono::{Duration, Utc};
 use serde::Deserialize;
+
+/// Refresh the cached token for a delegated (service account) login.
+///
+/// Unlike the OAuth path there is nothing long-lived to keep in sync — the key IS the credential,
+/// and every token is minted fresh from it. We still cache the access token so a burst of calls
+/// does not mean a burst of signed assertions.
+pub async fn refresh_service_account(config: &mut SingleAccountConfig, delegated: &DelegatedAccount) -> Result<bool> {
+    if Utc::now() < config.auth.token_expiry - Duration::minutes(2) && !config.auth.access_token.is_empty() {
+        return Ok(false);
+    }
+
+    let key = ServiceAccountKey::parse(&delegated.key_json)?;
+    let scopes: Vec<&str> = delegated.scopes.iter().map(String::as_str).collect();
+    let (access_token, expiry) = fetch_token(&key, &delegated.subject, &scopes).await?;
+
+    config.auth.access_token = access_token;
+    config.auth.token_expiry = expiry;
+    config.save()?;
+
+    Ok(true)
+}
 
 #[derive(Deserialize)]
 struct TokenResponse {
