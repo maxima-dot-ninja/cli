@@ -90,6 +90,52 @@ Every response is `{"data": ..., "ok": true}` or `{"error": "...", "ok": false}`
 Google's own parameter names work, and so do snake_case ones — `maxResults` and `max_results` both
 land. `vgoog list` gives you the action names; Google's API docs are the truth for what goes inside.
 
+## Scope: the newest 100, and no listing of the whole mailbox
+
+**"Process my emails" means the newest ~100.** Not the inbox. The cap goes on the LIST call —
+`max_results: 100` — so 100 is all that is ever fetched.
+
+Never enumerate the mailbox to find out how big it is. A harvest of every id and header is not
+progress, it is the thing that eats the turn and produces nothing: three thousand messages cannot be
+reasoned about, and a run that dies during the harvest has done zero work he can use. There is no
+question the full list answers that the newest hundred does not.
+
+A number he names wins. A query that narrows things ("from Samir", "unread this week") sets its own
+scope — run it, take what it returns, still capped at ~100.
+
+## Land the work as you go
+
+Classify and label in **batches of about 20, applying each batch before fetching the next.** Never
+classify everything first and apply at the end.
+
+The reason is failure: a run that stops halfway must leave 60 messages genuinely handled, not a
+half-built plan for 3,000. Batching turns a timeout into partial success instead of total loss.
+
+If you run out of room, stop cleanly and say exactly where the line fell — "worked the newest 100,
+oldest untouched is 12 Aug". That is a finished piece of work with a known edge.
+
+## Finish it — never hand it back
+
+The deliverable is the work, done. "I did the harvesting, which of these two things do you want
+next?" is the failure this whole section exists to prevent. He asked for emails to be processed;
+processed emails are the deliverable.
+
+- **Never end with a question you could have answered by acting.** Pick the obvious one and do it.
+- **Never report what you were *about* to do** — not a classifier, not a plan, not your progress.
+- **Never offer him a menu of ways to continue.**
+- **"To the best of your abilities" means do ALL of it** — not assess and report back.
+- **If you cannot finish, land what you can** and say exactly where you stopped.
+
+**Done here** means messages labelled, archived, trashed or drafted — the inbox measurably worked.
+**Irreversible here**, and the only things to stop for: actually sending mail to another person,
+sharing anything with anyone who is not him, and permanent `delete_message` (trashing is reversible
+and needs no permission).
+
+**Anything urgent goes at the TOP, before any account of what you did.** A failed payment, an expired
+domain, a suspended account, a legal or tax deadline — that is the message, and the triage summary is
+the footnote. Burying "Stripe payment failed" under a list of completed steps is worse than not
+running at all, because it reads as handled.
+
 ## Doing a lot at once
 
 Anything touching more than a handful of messages is a script, not a sequence of calls. One `vgoog`
