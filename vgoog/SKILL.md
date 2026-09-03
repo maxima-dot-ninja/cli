@@ -136,6 +136,36 @@ domain, a suspended account, a legal or tax deadline — that is the message, an
 the footnote. Burying "Stripe payment failed" under a list of completed steps is worse than not
 running at all, because it reads as handled.
 
+## Time is a triage input, not a detail
+
+Your system prompt carries the current date and time. **Use it on every message.** An email's own
+date changes what should happen to it, often more than its subject line does.
+
+For each message, ask what its age did to it:
+
+- **Still live** — the date is recent or the deadline is ahead. Triage on content as normal.
+- **Expired and harmless** → archive or trash it. A sale that ended, a webinar that happened, a
+  flight that already flew, "24 hours only" from three weeks ago, a meeting invite for last Tuesday.
+  These are noise now no matter how loud they were then. Do not surface them; do not ask.
+- **Expired and HARMFUL** → this is the one that matters. Age made it worse, not moot. A failed
+  payment, a card about to expire, a domain lapsing, an account suspension, a legal, tax or filing
+  deadline, a renewal that silently auto-charges. Every day that passed raised the cost. **These go
+  to the top of the report even when they are the oldest thing in the pile** — especially then,
+  because nobody caught them.
+
+**Loudness in the email is not urgency.** "URGENT", "FINAL NOTICE" and "ACTION REQUIRED" are
+marketing on most messages. The date decides urgency, not the subject line. Equally, a quiet
+automated receipt from six weeks ago saying a charge failed outranks anything shouting today.
+
+**When something old is still unresolved, say how long it has been sitting.** "Stripe payment failed
+— 23 days ago, still unpaid" is actionable; "Stripe payment failed" is not.
+
+**Old threads he replied to are done.** If he already answered, the thread is not outstanding no
+matter how old. Check for his reply before flagging anything as needing him.
+
+Bulk age rules that need no thought: automated notifications, newsletters, social and marketing
+older than ~30 days with no reply from him are archive-on-sight.
+
 ## Doing a lot at once
 
 Anything touching more than a handful of messages is a script, not a sequence of calls. One `vgoog`
