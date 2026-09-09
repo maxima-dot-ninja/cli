@@ -15,6 +15,17 @@ struct Provider {
 
 const PROVIDERS: &[Provider] = &[
     Provider {
+        name: "claude_cli",
+        display: "Claude Code (your subscription, no API key)",
+        models: &[
+            ("sonnet", "Claude Sonnet (recommended)"),
+            ("opus", "Claude Opus"),
+            ("haiku", "Claude Haiku"),
+        ],
+        needs_key: false,
+        env_var: "",
+    },
+    Provider {
         name: "anthropic",
         display: "Anthropic",
         models: &[

@@ -349,6 +349,22 @@ pub fn commit_signed(message: &str, gpg_key_id: &str) -> Result<()> {
     Ok(())
 }
 
+/// `git add -A` in the current directory, so `--root` commits everything in
+/// each repo the way a hand-run `git add .` at its top level would.
+pub fn stage_all() -> Result<()> {
+    let output = std::process::Command::new("git")
+        .args(["add", "-A"])
+        .output()
+        .context("Failed to execute git add")?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!("git add failed: {}", stderr.trim());
+    }
+
+    Ok(())
+}
+
 /// Create an unsigned commit with the given message
 pub fn commit_unsigned(message: &str) -> Result<()> {
     let output = std::process::Command::new("git")

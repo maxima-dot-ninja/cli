@@ -1,6 +1,6 @@
 # _cli
 
-Personal command-line tools. One repo, six independent tools, no shared build.
+Personal command-line tools. One repo, seven independent tools, no shared build.
 
 | Tool | What it does | Stack | Skill |
 |---|---|---|---|
@@ -8,6 +8,7 @@ Personal command-line tools. One repo, six independent tools, no shared build.
 | [**agree**](agree/README.md) | Invoices, agreements and contacts on the Agree API | Rust | ✅ |
 | [**vgoog**](vgoog/README.md) | All of Google Workspace — Gmail, Calendar, Drive, Sheets, Docs | Rust | ✅ |
 | [**pocket**](pocket/README.md) | Export and search recorded conversations | Bun / TypeScript | ✅ |
+| [**phog**](phog/README.md) | PostHog — HogQL, people by fingerprint, dashboards as files | Rust | ✅ |
 | [**lgit**](lgit/README.md) | AI-written git commit messages | Rust | — |
 | **ccx** | Claude Code launcher with auto-named sessions | Bash | — |
 
@@ -115,6 +116,21 @@ Numbers come from Claude's live session registry at `~/.claude/sessions/`, so:
 - A session killed without cleanup has its number reclaimed automatically
 
 Pass your own `--name` to opt out. All other args go straight through to `claude`.
+
+```sh
+ccx details          # every ended session of this folder, one line each
+```
+
+Each line is the start date, the session name and a one-sentence summary. The
+summary comes from `claude -p` on your normal login, so no API key is needed.
+Summaries are cached in `~/.config/ccx/summaries/` and only redone when a session
+has grown since, so the first run takes a while and reruns are instant.
+
+```sh
+ccx cleanup          # renumber ended sessions so no two share a title
+ccx delete <name>    # delete one session by its name, from any folder
+ccx clear-all        # delete every ended session of this folder
+```
 
 ## Install
 

@@ -12,7 +12,7 @@ AI-powered git commits. Stage your changes, let AI write the message.
 
 - **AI-generated commit messages** — Analyzes your diff and writes conventional commit messages
 - **Ask follow-up questions** — Ask about the change in plain English and get the real diff back, or tell it how to reword the message
-- **Multiple AI providers** — Anthropic, OpenAI, Google Gemini, or local Ollama
+- **Multiple AI providers** — your Claude Code subscription, Anthropic, OpenAI, Google Gemini, or local Ollama
 - **GPG signing** — Sign commits with your GPG key, or commit unsigned
 - **Auto push with smart retry** — Automatically pulls and retries if remote has new commits
 - **PR link generation** — Get a quick link to create a PR on GitHub/GitLab
@@ -137,11 +137,21 @@ Two things worth knowing:
   than guessed at, so it will never show you a diff for a file that isn't in the commit.
 - A bare file name works — `stats.rs` resolves to `src/api/stats.rs`.
 
+### Many repos at once
+
+From a folder that holds several repositories, `lgit --root` runs `git add -A` in
+each one, asks the model for every commit message at the same time, and then walks
+you through the repos in the order their messages come back. Each stop is the normal
+review loop, so you can edit, ask, regenerate, or cancel per repo. Cancel skips that
+repo and moves on. Repos with nothing to commit are listed and left alone, and a
+summary at the end shows what was committed, skipped, or failed.
+
 ### Commands
 
 ```bash
 lgit                  # Run the commit flow
 lgit --tag v1.0.0     # Commit, then tag it
+lgit --root           # Commit every repo in this folder, one after another
 lgit --setup          # Re-run setup wizard
 lgit --model          # Change AI model (can switch providers)
 lgit --key            # Manage API keys
@@ -170,7 +180,7 @@ Load it from `~/.zshrc`:
 [ -f ~/.config/secrets.env ] && source ~/.config/secrets.env
 ```
 
-Ollama runs locally and needs no key at all.
+Ollama runs locally and needs no key at all. The Claude Code provider needs no key either: it runs `claude -p` and bills your Claude subscription, so it works anywhere you are logged into Claude Code.
 
 **Alternative — `lgit --setup`** writes the key into the config file for you. Don't
 `echo` a key into it by hand; that leaves a copy in `~/.zsh_history` forever.
@@ -209,6 +219,7 @@ color = true
 
 | Provider | Models (first is the default) | API Key Env Var |
 |----------|--------|-----------------|
+| Claude Code | sonnet, opus, haiku (whatever your subscription serves) | — (uses your Claude Code login) |
 | Anthropic | Claude Sonnet 4, Opus 4, Haiku 4.5 | `ANTHROPIC_API_KEY` |
 | OpenAI | GPT-5.2, 5.2 Pro, 5, 5 Mini, 5 Nano, 4.1 | `OPENAI_API_KEY` |
 | Google Gemini | Gemini 3.1 Pro, 3 Pro, 3 Flash, 2.5 Flash, 2.5 Flash-Lite | `GOOGLE_API_KEY` |

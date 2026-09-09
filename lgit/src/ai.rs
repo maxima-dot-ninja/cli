@@ -1,5 +1,5 @@
 use crate::config::Config;
-use crate::providers::{anthropic, gemini, ollama, openai};
+use crate::providers::{anthropic, claude_cli, gemini, ollama, openai};
 use anyhow::Result;
 
 /// System prompt: role, format, and examples. Sent as a system message so it
@@ -222,6 +222,7 @@ fn is_large_diff(diff: &str) -> bool {
 
 async fn dispatch(config: &Config, system: &str, prompt: &str) -> Result<String> {
     match config.provider.name.as_str() {
+        "claude_cli" => claude_cli::generate(&config.provider, system, prompt).await,
         "anthropic" => anthropic::generate(&config.provider, system, prompt).await,
         "openai" => openai::generate(&config.provider, system, prompt).await,
         "gemini" => gemini::generate(&config.provider, system, prompt).await,

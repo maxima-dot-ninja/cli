@@ -1,0 +1,108 @@
+# The Ask Croissant funnel, from the panel opening to money.
+# Apply with:  phog dashboards apply dashboards/ask-croissant.yaml
+name: Ask Croissant
+slug: ask-croissant
+description: What the workspace chat does for visitors, from the first message to a signed term.
+tags: [croissant]
+date_from: -30d
+
+insights:
+  - key: chats-opened
+    name: Chats opened
+    type: number
+    series:
+      - event: astronaut_opened
+        math: unique_session
+    layout: {x: 0, y: 0, w: 3, h: 3}
+
+  - key: turns
+    name: Turns answered
+    type: number
+    series:
+      - event: agent_turn_finished
+    layout: {x: 3, y: 0, w: 3, h: 3}
+
+  - key: emails
+    name: Emails captured
+    type: number
+    series:
+      - event: agent_contact_captured
+    layout: {x: 6, y: 0, w: 3, h: 3}
+
+  - key: cost
+    name: Model spend
+    description: Output tokens are what cost money; input is mostly the prompt and the history.
+    type: number
+    series:
+      - event: $ai_generation
+        math: sum
+        property: $ai_output_tokens
+        name: Output tokens
+    layout: {x: 9, y: 0, w: 3, h: 3}
+
+  - key: funnel
+    name: From opening the chat to a signed term
+    type: funnel
+    window: 30d
+    series:
+      - event: astronaut_opened
+        name: Opened the chat
+      - event: agent_results_shown
+        name: Saw spaces
+      - event: astronaut_card_clicked
+        name: Opened a space
+      - event: lead_captured
+        name: Left an email
+      - event: office_term_signed
+        name: Signed a term
+    layout: {x: 0, y: 3, w: 6, h: 6}
+
+  - key: turns-by-day
+    name: Turns per day
+    type: trends
+    interval: day
+    series:
+      - event: agent_turn_finished
+        name: Finished
+      - event: agent_turn_failed
+        name: Failed
+    layout: {x: 6, y: 3, w: 6, h: 6}
+
+  - key: skills
+    name: What the agent reaches for
+    type: trends
+    display: ActionsBarValue
+    breakdown: skill
+    series:
+      - event: agent_skill_called
+    layout: {x: 0, y: 9, w: 6, h: 5}
+
+  - key: latency
+    name: Seconds per turn, p90
+    type: trends
+    interval: day
+    series:
+      - event: $ai_generation
+        math: p90
+        property: $ai_latency
+    layout: {x: 6, y: 9, w: 6, h: 5}
+
+  - key: recent-chats
+    name: Recent conversations
+    description: One line per chat, with how far it got.
+    type: hogql
+    query: |
+      SELECT
+        properties.plan_chat_id AS chat,
+        min(timestamp) AS started,
+        countIf(event = 'agent_turn_finished') AS turns,
+        countIf(event = 'agent_results_shown') AS results,
+        countIf(event = 'agent_contact_captured') > 0 AS email,
+        countIf(event = 'agent_specialist_shown') > 0 AS specialist,
+        any(properties.fingerprint) AS fingerprint
+      FROM events
+      WHERE properties.plan_chat_id IS NOT NULL AND timestamp > now() - INTERVAL 30 DAY
+      GROUP BY chat
+      ORDER BY started DESC
+      LIMIT 100
+    layout: {x: 0, y: 14, w: 12, h: 8}

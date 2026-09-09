@@ -348,6 +348,67 @@ pub fn print_pr_link(url: &str) {
     println!();
 }
 
+/// Heading for one repo during `--root`, numbered in the order it came up
+pub fn print_repo_heading(name: &str, index: usize, total: usize) {
+    println!();
+    println!(
+        "{} {}  {}",
+        style("▸").blue().bold(),
+        style(name).bold(),
+        style(format!("({index}/{total})")).dim()
+    );
+    println!();
+}
+
+/// End-of-run summary for `--root`
+pub fn print_root_summary(clean: &[String], outcomes: &[(String, crate::Outcome)]) {
+    let committed: Vec<&str> = outcomes
+        .iter()
+        .filter(|(_, o)| matches!(o, crate::Outcome::Committed))
+        .map(|(n, _)| n.as_str())
+        .collect();
+    let skipped: Vec<&str> = outcomes
+        .iter()
+        .filter(|(_, o)| matches!(o, crate::Outcome::Skipped))
+        .map(|(n, _)| n.as_str())
+        .collect();
+    let failed: Vec<String> = outcomes
+        .iter()
+        .filter_map(|(n, o)| match o {
+            crate::Outcome::Failed(why) => Some(format!("{n} — {why}")),
+            _ => None,
+        })
+        .collect();
+
+    println!();
+    println!("{}", style("──────── Summary ────────").bold());
+    if !committed.is_empty() {
+        println!("{}", style("Committed:").green());
+        for name in committed {
+            println!("  • {name}");
+        }
+    }
+    if !skipped.is_empty() {
+        println!("{}", style("Skipped:").yellow());
+        for name in skipped {
+            println!("  • {name}");
+        }
+    }
+    if !clean.is_empty() {
+        println!("{}", style("Nothing to commit:").dim());
+        for name in clean {
+            println!("  • {name}");
+        }
+    }
+    if !failed.is_empty() {
+        println!("{}", style("Failed:").red());
+        for line in failed {
+            println!("  • {line}");
+        }
+    }
+    println!();
+}
+
 /// Clear the terminal screen
 #[allow(dead_code)]
 pub fn clear_screen() {
