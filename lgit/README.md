@@ -16,6 +16,8 @@ AI-powered git commits. Stage your changes, let AI write the message.
 - **GPG signing** — Sign commits with your GPG key, or commit unsigned
 - **Auto push with smart retry** — Automatically pulls and retries if remote has new commits
 - **PR link generation** — Get a quick link to create a PR on GitHub/GitLab
+- **Many repos at once** — `lgit --root` stages and commits every repo in a folder, with all the messages written in parallel
+- **Plain-English status** — `lgit status` tells you what you're in the middle of, what could bite you, and what to do next
 
 ## Installation
 
@@ -49,6 +51,12 @@ lgit
 ```
 
 > **Note:** lgit only commits staged changes. You must run `git add` first to stage the files you want to include. Unstaged changes will not be committed.
+
+lgit sends the model the list of staged files and the staged diff, and asks for a
+**Conventional Commits** message. A diff over **30,000 characters** is trimmed so that
+every file keeps an equal share, and the file list always goes through whole. If the
+reply does not start with a valid header such as `feat(scope): ...`, lgit asks **once
+more**, and then it stops and shows you what the model said.
 
 ### Example Session
 
@@ -95,6 +103,9 @@ lgit
   https://github.com/user/repo/compare/feature-branch?expand=1
 ```
 
+**✎ Edit message** opens the message in your editor (`$VISUAL`, or `$EDITOR` if that
+is unset), and whatever you save becomes the new suggestion.
+
 ### Asking about the change
 
 Pick **? Ask about the changes** and type a question in plain English. lgit does one
@@ -108,6 +119,10 @@ Ask: tell me about the new daily breakdown endpoint
 
 📄 src/api/stats.rs
 
+  diff --git a/src/api/stats.rs b/src/api/stats.rs
+  index 3f2a1c0..8b9d4e2 100644
+  --- a/src/api/stats.rs
+  +++ b/src/api/stats.rs
   @@ -10,6 +10,18 @@
   +pub async fn daily_breakdown(range: DateRange) -> Result<Vec<DailyStat>> {
   +    let rows = db::query_daily(range).await?;
@@ -117,6 +132,9 @@ Ask: tell me about the new daily breakdown endpoint
   This adds the daily_breakdown handler, which queries per-day rows and
   maps them into DailyStat.
 ```
+
+Each file shows at most **200 lines** of diff, and lgit prints the
+`git diff --cached -- <path>` command that shows the rest.
 
 **Say how to change the message, get it rewritten:**
 
@@ -146,10 +164,50 @@ review loop, so you can edit, ask, regenerate, or cancel per repo. Cancel skips 
 repo and moves on. Repos with nothing to commit are listed and left alone, and a
 summary at the end shows what was committed, skipped, or failed.
 
+It looks **one level down** only, so neither the folder itself nor repos nested deeper
+are included, while a worktree (a folder with a `.git` file) counts. Adding `--tag`
+tags every repo that gets committed.
+
+### What's going on here?
+
+`lgit status` is `git status` written for a person. It reads the branch and its
+upstream, any merge or rebase in progress, stashes, how far the branch is from
+`main`, the staged and unstaged diffs, and the first lines of new files. Then it
+answers three questions:
+
+- **What are you in the middle of?** It describes the work by what it is for, not by which files changed.
+- **What could bite you?** It looks for conflicts, a staged change that won't build without an unstaged or untracked file, secrets, leftover debug code, junk that belongs in `.gitignore`, a stale fetch, and forgotten stashes.
+- **What should you do next?** It gives the commands, and says how to split the work when it should be more than one commit.
+
+```
+▸ lgit
+  On main, tracking origin/main: 2 ahead (last fetched 3 hours ago).
+  Files: 1 staged, 2 unstaged, 1 untracked.
+
+Summary
+  You're adding an `lgit status` command. Only the README is staged; the code is not.
+
+Watch out
+  • `src/main.rs` declares `mod status;`, but `src/status.rs` is untracked, so
+    committing what's staged now would not build.
+
+Next
+  • Stage everything with `git add -A` and commit it as one feature.
+```
+
+It never changes anything, and it never takes git's index lock, so it is safe to
+run in the middle of anything. The first lines come straight from git and print
+immediately; the explanation follows when the model replies. A clean repo that is
+in sync gets a one-line answer and no model call at all.
+
+Untracked files whose names look like secrets (`.env`, `*.pem`, `id_rsa`, and
+so on) are listed by name only. Their contents are never sent to the model.
+
 ### Commands
 
 ```bash
 lgit                  # Run the commit flow
+lgit status           # Explain what's going on in this repo, in plain English
 lgit --tag v1.0.0     # Commit, then tag it
 lgit --root           # Commit every repo in this folder, one after another
 lgit --setup          # Re-run setup wizard
@@ -157,13 +215,24 @@ lgit --model          # Change AI model (can switch providers)
 lgit --key            # Manage API keys
 lgit --config         # Show current configuration
 lgit --gpginfo        # Show GPG key setup instructions
+lgit --version        # Print the version
 ```
 
 ## Configuration
 
 ### Where to put your API key
 
-**Recommended — `~/.config/secrets.env`**, using your provider's standard variable:
+lgit makes every request with the key saved in its **config file**. It reads your
+provider's environment variable (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or
+`GOOGLE_API_KEY`) only while `lgit --setup`, `lgit --model`, or `lgit --key` is
+running, and never when it commits.
+
+**The easiest way is `lgit --setup`.** If the variable is set in your shell, setup
+copies its value into the config file. If it isn't, setup asks for the key with the
+input hidden. Don't `echo` a key into the config by hand, because that leaves a copy
+in `~/.zsh_history` forever.
+
+If you keep keys in `~/.config/secrets.env`, use your provider's standard variable:
 
 ```sh
 mkdir -p ~/.config && chmod 700 ~/.config
@@ -180,12 +249,23 @@ Load it from `~/.zshrc`:
 [ -f ~/.config/secrets.env ] && source ~/.config/secrets.env
 ```
 
+Then run `lgit --setup` so the key is copied into the config.
+
+**`lgit --model` does not copy the key.** If you switch to a provider whose variable is
+set, lgit leaves `api_key` empty and that provider rejects every request. Use
+`lgit --setup` to switch in that case. When the variable is not set, `--model` asks for
+the key and saves it.
+
+**`lgit --key`** shows, for each provider, whether its key is set in the environment,
+set in the config, or not set. It saves a new key only for the provider you are using
+now. For any other provider it prints an `export` line for your shell profile, and you
+then switch with `lgit --setup` so the key lands in the config. It won't change a key
+whose variable is already set in your environment.
+
 Ollama runs locally and needs no key at all. The Claude Code provider needs no key either: it runs `claude -p` and bills your Claude subscription, so it works anywhere you are logged into Claude Code.
 
-**Alternative — `lgit --setup`** writes the key into the config file for you. Don't
-`echo` a key into it by hand; that leaves a copy in `~/.zsh_history` forever.
-
-Run `lgit --config` to see which key is in use.
+`lgit --config` shows whether a key is saved, masked as `••••••••`, but never the key
+itself.
 
 ### Config file
 
@@ -215,17 +295,30 @@ pr_link = true
 color = true
 ```
 
+`provider.name` is one of `claude_cli`, `anthropic`, `openai`, `gemini`, or `ollama`,
+and `provider.model` is the model id that provider expects. `api_key` stays empty for
+Claude Code and Ollama. `git.auto_push` pushes after every commit and `git.pr_link`
+prints the pull request link, and both default to `true`.
+
+**`ui.color` has no effect** yet, since nothing reads it. To turn colors off, set
+`NO_COLOR=1` or `CLICOLOR=0` in your shell instead.
+
 ## Supported Providers
 
-| Provider | Models (first is the default) | API Key Env Var |
-|----------|--------|-----------------|
-| Claude Code | sonnet, opus, haiku (whatever your subscription serves) | — (uses your Claude Code login) |
-| Anthropic | Claude Sonnet 4, Opus 4, Haiku 4.5 | `ANTHROPIC_API_KEY` |
-| OpenAI | GPT-5.2, 5.2 Pro, 5, 5 Mini, 5 Nano, 4.1 | `OPENAI_API_KEY` |
-| Google Gemini | Gemini 3.1 Pro, 3 Pro, 3 Flash, 2.5 Flash, 2.5 Flash-Lite | `GOOGLE_API_KEY` |
-| Ollama | Any installed model | — |
+| Provider | Config name | Models (first is the default) | API Key Env Var |
+|----------|-------------|--------|-----------------|
+| Claude Code | `claude_cli` | sonnet, opus, haiku (whatever your subscription serves) | — (uses your Claude Code login) |
+| Anthropic | `anthropic` | Claude Sonnet 4, Opus 4, Haiku 4.5 | `ANTHROPIC_API_KEY` |
+| OpenAI | `openai` | GPT-5.2, 5 Mini, 5 Nano, 5.2 Pro, 5, 4.1 | `OPENAI_API_KEY` |
+| Google Gemini | `gemini` | Gemini 3.1 Pro, 3 Flash, 3 Pro, 2.5 Flash, 2.5 Flash-Lite | `GOOGLE_API_KEY` |
+| Ollama | `ollama` | Any installed model | — |
 
 `lgit --model` lists exactly these and switches provider at the same time.
+
+The Claude Code provider runs `claude -p` with its tools, settings files, MCP servers,
+and memory turned off, so each call is a plain model call. It needs `claude` on your
+`PATH` and a logged-in session. Ollama is reached at `http://localhost:11434`, and
+setup offers whatever models `ollama list` reports.
 
 ## Smart Push
 
@@ -242,9 +335,18 @@ If the remote has commits you don't have locally, lgit automatically:
 ✓ Pushed successfully!
 ```
 
+lgit pushes only when `auto_push` is on. A branch with no upstream gets
+`git push --set-upstream origin <branch>` on its first push. The pull is a plain
+`git pull`, so your own merge or rebase setting applies, and if the push is still
+rejected after it, lgit warns you and leaves it to you. With `--tag`, lgit pushes the
+commit first and then runs `git push --tags`.
+
+The PR link appears only for an `origin` on **github.com** or **gitlab.com**. On
+GitLab it opens a new merge request.
+
 ## GPG Signing
 
-lgit supports GPG-signed commits. On each commit, you choose whether to sign and which key to use:
+lgit supports GPG-signed commits. On each commit, you choose whether to sign and which key to use. lgit finds your keys with `gpg --list-secret-keys` and signs with `git commit -S --gpg-sign=<key id>`.
 
 ```
 ? Select signing option
@@ -255,7 +357,11 @@ lgit supports GPG-signed commits. On each commit, you choose whether to sign and
 
 ### No GPG Keys?
 
-If you don't have GPG keys set up, lgit will offer to create an unsigned commit:
+**The `gpg` program itself must be installed**, even if you never sign. lgit runs it
+before every commit to look for keys, and when it isn't on your `PATH` the commit stops
+with `Failed to execute gpg`.
+
+If `gpg` is installed but you don't have GPG keys set up, lgit will offer to create an unsigned commit:
 
 ```
 ⚠ No GPG keys found. Run `lgit --gpginfo` for setup instructions.
@@ -286,10 +392,11 @@ Or see [docs/GPG_SETUP.md](docs/GPG_SETUP.md) for the complete guide.
 
 ## Requirements
 
-- Rust 1.70+
-- Git
-- GPG (optional, for commit signing)
-- API key for your chosen provider (or Ollama installed locally)
+- Building needs **Rust 1.83 or newer** and a C compiler, because cargo builds libgit2 from source.
+- On Linux the build also needs the **OpenSSL** development headers and `pkg-config`.
+- **Git** must be installed, since lgit runs the `git` command to commit, push, pull, and diff.
+- **GPG** must be installed even if you never sign, because lgit runs `gpg` before every commit to list your keys.
+- You need an API key for Anthropic, OpenAI, or Gemini, or else a logged-in **Claude Code** or a running **Ollama**.
 
 ## License
 

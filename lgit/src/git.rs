@@ -164,6 +164,9 @@ fn get_file_stats(diff: &git2::Diff, path: &str) -> (usize, usize) {
     (additions, deletions)
 }
 
+/// How much staged diff the commit-message prompt carries
+const MAX_DIFF_LEN: usize = 30000;
+
 /// Get the full diff of staged changes as a string
 pub fn get_staged_diff() -> Result<String> {
     let repo = Repository::open_from_env().context("Not a git repository")?;
@@ -191,7 +194,7 @@ pub fn get_staged_diff() -> Result<String> {
         true
     })?;
 
-    Ok(budget_diff(&diff_text))
+    Ok(budget_diff(&diff_text, MAX_DIFF_LEN))
 }
 
 /// Trim an oversized diff without letting any file disappear.
@@ -199,19 +202,17 @@ pub fn get_staged_diff() -> Result<String> {
 /// Cutting the stream at a fixed byte count drops whole files off the end — the
 /// model then describes only the files that survived and invents a story for the
 /// rest. Giving every file its own slice of the budget keeps all of them visible.
-fn budget_diff(diff_text: &str) -> String {
-    const MAX_DIFF_LEN: usize = 30000;
-
-    if diff_text.len() <= MAX_DIFF_LEN {
+pub fn budget_diff(diff_text: &str, max: usize) -> String {
+    if diff_text.len() <= max {
         return diff_text.to_string();
     }
 
     let sections = split_file_sections(diff_text);
     if sections.is_empty() {
-        return clip_lines(diff_text, MAX_DIFF_LEN);
+        return clip_lines(diff_text, max);
     }
 
-    let per_file = MAX_DIFF_LEN / sections.len();
+    let per_file = max / sections.len();
     sections
         .iter()
         .map(|section| clip_lines(section, per_file))
@@ -548,7 +549,7 @@ mod tests {
     #[test]
     fn small_diffs_pass_through_untouched() {
         let diff = file_section("a.rs", 3);
-        assert_eq!(budget_diff(&diff), diff);
+        assert_eq!(budget_diff(&diff, MAX_DIFF_LEN), diff);
     }
 
     #[test]
@@ -563,7 +564,7 @@ mod tests {
         );
         assert!(diff.len() > 30000, "fixture must exceed the cap");
 
-        let out = budget_diff(&diff);
+        let out = budget_diff(&diff, MAX_DIFF_LEN);
         assert!(out.len() <= 30000 + 500, "budget respected, got {}", out.len());
         for name in ["huge.md", "small.ts", "other.ts"] {
             assert!(out.contains(name), "{name} was dropped from the trimmed diff");

@@ -409,6 +409,88 @@ pub fn print_root_summary(clean: &[String], outcomes: &[(String, crate::Outcome)
     println!();
 }
 
+/// Repo name and the plain facts from git, shown while the model thinks
+pub fn print_status_header(name: &str, lines: &[String]) {
+    println!();
+    println!("{} {}", style("▸").blue().bold(), style(name).bold());
+    for line in lines {
+        println!("  {}", style(line).dim());
+    }
+}
+
+/// Print the model's explanation. It writes a small slice of markdown ("## "
+/// headings, "- " bullets, `code`, **bold**), turned into terminal styling here.
+pub fn print_status_report(report: &str) {
+    for line in report.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        if line.starts_with('#') {
+            print_status_heading(line.trim_start_matches('#').trim());
+            continue;
+        }
+        match line.strip_prefix("- ").or_else(|| line.strip_prefix("* ")) {
+            Some(item) => print_wrapped(&format!("  {} ", style("•").dim()), "    ", &inline_markdown(item)),
+            None => print_wrapped("  ", "  ", &inline_markdown(line)),
+        }
+    }
+    println!();
+}
+
+fn print_status_heading(heading: &str) {
+    let styled = if heading.eq_ignore_ascii_case("watch out") {
+        style(heading).yellow().bold()
+    } else {
+        style(heading).cyan().bold()
+    };
+    println!();
+    println!("{styled}");
+}
+
+/// `code` in cyan and **bold** in bold; everything else as written
+fn inline_markdown(text: &str) -> String {
+    text.split('`')
+        .enumerate()
+        .map(|(i, part)| {
+            if i % 2 == 1 {
+                return style(part).cyan().to_string();
+            }
+            part.split("**")
+                .enumerate()
+                .map(|(j, piece)| if j % 2 == 1 { style(piece).bold().to_string() } else { piece.to_string() })
+                .collect::<String>()
+        })
+        .collect()
+}
+
+/// Word-wrap to the terminal width with a hanging indent, so a long bullet
+/// still reads as one bullet. Styled words wrap safely because the terminal
+/// keeps a style active across the line break until its reset code.
+fn print_wrapped(lead: &str, indent: &str, text: &str) {
+    let width = usize::from(Term::stdout().size().1).clamp(40, 100);
+    let mut line = lead.to_string();
+    let mut used = console::measure_text_width(lead);
+    let mut empty = true;
+    for word in text.split(' ') {
+        let len = console::measure_text_width(word);
+        if !empty && used + 1 + len > width {
+            println!("{line}");
+            line = indent.to_string();
+            used = indent.len();
+            empty = true;
+        }
+        if !empty {
+            line.push(' ');
+            used += 1;
+        }
+        line.push_str(word);
+        used += len;
+        empty = false;
+    }
+    println!("{line}");
+}
+
 /// Clear the terminal screen
 #[allow(dead_code)]
 pub fn clear_screen() {

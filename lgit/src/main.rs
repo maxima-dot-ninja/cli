@@ -3,10 +3,11 @@ mod config;
 mod git;
 mod providers;
 mod setup;
+mod status;
 mod ui;
 
 use anyhow::{Context, Result};
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use std::path::{Path, PathBuf};
 use tokio::sync::mpsc;
 
@@ -44,6 +45,16 @@ struct Cli {
     /// one by one as they arrive
     #[arg(long)]
     root: bool,
+
+    #[command(subcommand)]
+    command: Option<Command>,
+}
+
+#[derive(Subcommand)]
+enum Command {
+    /// Explain in plain English what's going on in this repo: what you're in
+    /// the middle of, what could bite you, and what to do next
+    Status,
 }
 
 #[tokio::main]
@@ -77,6 +88,10 @@ async fn main() -> Result<()> {
         if cli.setup {
             return Ok(());
         }
+    }
+
+    if let Some(Command::Status) = cli.command {
+        return status::run().await;
     }
 
     if cli.root {

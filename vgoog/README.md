@@ -1,8 +1,8 @@
 # vgoog
 
-A blazing fast, multi-account terminal UI for managing your entire Google Workspace — Gmail, Calendar, Drive, Sheets, Docs, Slides, Forms, Tasks, Contacts, and Apps Script — across all your Google accounts, from a single keystroke-driven interface.
+A blazing fast, multi-account terminal UI and JSON command line for managing your entire Google Workspace — Gmail, Calendar, Drive, Sheets, Docs, Slides, Forms, Tasks, Contacts, and Apps Script — across all your Google accounts. Run `vgoog` for the keystroke-driven interface, or `vgoog exec` to script any action and get JSON back.
 
-Multi-account. Instant switching. One tool for every account. Built in Rust. 3.5MB binary. Zero bloat.
+One tool handles every account, switches between them instantly, and ships as a single **4.4MB** Rust binary.
 
 ```
   vgoog -- Google Workspace Manager                  Work Gmail
@@ -20,7 +20,7 @@ Multi-account. Instant switching. One tool for every account. Built in Rust. 3.5
       Apps Script
 
  ────────────────────────────────────────────────────────────────
-  Welcome to vgoog!             up/dn Select  ^A Account  q Q
+  Welcome to vgoog!      ↑↓ Navigate  ⏎ Select  ^A Account  q Quit
 ```
 
 ---
@@ -35,10 +35,10 @@ We believe:
 
 - **The terminal is the power user's home.** If you live in the terminal, your Google Workspace should live there too. No Electron apps. No browser tabs. No loading spinners.
 - **One interface, ten services.** You shouldn't need ten different apps to manage ten Google services. You need one. With consistent navigation, consistent keybindings, and zero learning curve between services.
-- **Speed is a feature.** vgoog is written in Rust with async I/O, compiles to a 3.4MB static binary, starts instantly, and renders at 60fps. The only bottleneck is Google's API latency — and we handle pagination and token refresh transparently so you never wait for anything we control.
+- **Speed is a feature.** vgoog is written in Rust with async I/O, compiles to a 4.4MB static binary, starts instantly, and renders at 60fps. The only bottleneck is Google's API latency — and we handle pagination and token refresh transparently so you never wait for anything we control.
 - **Text is the universal interface.** Every API response is browsable as structured JSON. Every action is a form you can fill out with your keyboard. No mouse required. No GUIs. Just text, terminals, and keystrokes.
-- **Completeness matters.** vgoog doesn't just list your emails and call it a day. It exposes 219 API methods across 10 services — messages, threads, labels, drafts, filters, settings, delegates, forwarding, send-as aliases, calendar events with attendees, drive file uploads with multipart encoding, spreadsheet cell manipulation, document formatting, presentation slide management, form question builders, task hierarchies, contact groups, Apps Script deployments and remote execution. If Google's API supports it, vgoog lets you do it.
-- **Trust the operator.** vgoog gives you the raw power of Google's APIs without hiding behind "are you sure?" dialogs for every action. Destructive operations get a single confirm prompt. Everything else executes immediately. You're an adult. You know what you're doing.
+- **Completeness matters.** vgoog doesn't just list your emails and call it a day. It exposes 237 API methods across 10 services — messages, threads, labels, drafts, filters, settings, delegates, forwarding, send-as aliases, calendar events with attendees, drive file uploads with multipart encoding, spreadsheet cell manipulation, document formatting, presentation slide management, form question builders, task hierarchies, contact groups, Apps Script deployments and remote execution. If Google's API supports it, vgoog lets you do it.
+- **Trust the operator.** vgoog gives you the raw power of Google's APIs without hiding behind "are you sure?" dialogs for every action. Destructive operations in the TUI get a single confirm prompt, and `vgoog exec` asks nothing at all. Everything else executes immediately. You're an adult. You know what you're doing.
 
 ---
 
@@ -46,18 +46,19 @@ We believe:
 
 ### From source
 
+vgoog lives in the `_cli` repo. Cargo builds a release binary and installs it into `~/.cargo/bin`:
+
 ```bash
-git clone <repo-url>
-cd vgoog
-cargo build --release
-cp target/release/vgoog ~/.local/bin/  # or wherever your PATH looks
+git clone <repo-url> _cli
+cd _cli/vgoog
+cargo install --path .
 ```
 
 ### Requirements
 
-- Rust 1.70+ (build only)
-- A Google Cloud project with OAuth2 credentials
-- The following APIs enabled in your Google Cloud Console:
+- You need **Rust 1.85+** to build it, because the locked `uuid` crate requires that version.
+- You need a Google Cloud project with a **Desktop app** OAuth client, or a Workspace service account key with domain-wide delegation.
+- The following APIs must be enabled in your Google Cloud Console:
   - Gmail API
   - Google Calendar API
   - Google Drive API
@@ -73,38 +74,39 @@ cp target/release/vgoog ~/.local/bin/  # or wherever your PATH looks
 
 ## Setup
 
-On first launch, vgoog walks you through configuration. You name the account and paste your OAuth credentials:
+On first launch, vgoog walks you through configuration. You name the account, then choose how it signs in:
 
 ```
   ╔═══════════════════════════════════════╗
   ║     vgoog — Google Workspace TUI      ║
-  ║          First-time Setup              ║
+  ║     First-time Setup                  ║
   ╚═══════════════════════════════════════╝
 
   Account name (e.g. work, personal): work
   Display label (e.g. Work Gmail): Work Gmail
 
-  ── Manual Token Entry ──
+  How should this account authenticate?
 
-  Get tokens from: https://console.cloud.google.com/apis/credentials
-  Or use the OAuth Playground: https://developers.google.com/oauthplayground/
+    1  Sign in with Google        — opens a browser, catches the callback (recommended)
+    2  Service account            — Workspace only, impersonates a user, no browser ever
+    3  Paste tokens by hand       — when you already have them
 
-  GOOGLE_OAUTH_CLIENT_ID: ****
-  GOOGLE_OAUTH_CLIENT_SECRET: ****
-  GOOGLE_OAUTH_ACCESS_TOKEN: ****
-  GOOGLE_OAUTH_REFRESH_TOKEN: ****
+  Choose [1]:
 ```
 
-You need a Client ID, Client Secret, Access Token, and Refresh Token. See [Getting OAuth Credentials](#getting-oauth-credentials) below for step-by-step instructions. Once configured, vgoog automatically refreshes your access token when it expires — you never paste tokens again.
+The default, option 1, only asks for the **Client ID** and **Client Secret** of a Desktop app OAuth client. vgoog then opens your browser, catches Google's redirect itself, and stores the refresh token it gets back. See [Getting OAuth Credentials](#getting-oauth-credentials) for creating the client, and [Authentication](#authentication) for the other two options. Once configured, vgoog automatically refreshes your access token when it expires — you never paste tokens again.
+
+vgoog lowercases the account name and turns spaces into hyphens, and an empty name becomes `default`. The wizard is skipped entirely when `~/.config/secrets.env` already holds vgoog credentials (see [Restoring from the vault](#restoring-from-the-vault)).
 
 ### Multi-Account Support
 
-vgoog supports multiple Google accounts. Add as many as you need — work, personal, client accounts, etc.
+vgoog supports multiple Google accounts. Add as many as you need — work, personal, client accounts, etc. The wizard only appears when no usable account exists, and the TUI has no add-account screen, so you add each further account with `vgoog login --account <name>` (see [Authentication](#authentication)). A login creates or replaces that account and makes it the active one.
 
-Credentials are saved to `~/.config/vgoog/config.toml`:
+Credentials and cached tokens are saved to `config.toml` in vgoog's config directory. That directory is `~/Library/Application Support/vgoog/` on macOS, `~/.config/vgoog/` on Linux and `%APPDATA%\vgoog\` on Windows, and setting **`VGOOG_CONFIG_DIR`** moves it anywhere else. The file holds refresh tokens and service account keys in plain text, and vgoog writes it with your default file permissions. It looks like this:
 
 ```toml
 active_account = "work"
+strategy = "auto"
 
 [accounts.work]
 label = "Work Gmail"
@@ -116,20 +118,27 @@ access_token = "ya29.a0..."
 refresh_token = "1//0e..."
 token_expiry = 2026-02-20T12:00:00Z
 
-[accounts.personal]
-label = "Personal"
+[accounts.you]
+label = "you@yourdomain.com (delegated)"
 
-[accounts.personal.auth]
-client_id = "..."
-client_secret = "..."
-access_token = "..."
-refresh_token = "..."
+[accounts.you.auth]
+client_id = ""
+client_secret = ""
+access_token = "ya29.c0..."
+refresh_token = ""
 token_expiry = 2026-02-20T12:00:00Z
+
+[accounts.you.service_account]
+subject = "you@yourdomain.com"
+key_json = "{ ...the whole key file... }"
+scopes = ["https://www.googleapis.com/auth/gmail.modify", "..."]
 ```
 
-Switch between accounts instantly with `Ctrl+A` inside the TUI. The active account is displayed in the header bar. Switching resets your view back to service selection so you start fresh with the new account's data.
+An account with a `service_account` block signs in as that service account, acting as `subject`. Its `auth` fields then only cache the access token vgoog minted.
 
-vgoog automatically refreshes your access token when it expires (with a 2-minute safety buffer), saves the new token to disk, and never interrupts your workflow.
+Switch between accounts instantly with `Ctrl+A` inside the TUI. The active account is displayed in the header bar. Switching resets your view back to service selection so you start fresh with the new account's data, and it saves that account as the active one, so later `vgoog exec` calls use it too.
+
+vgoog automatically refreshes your access token when it expires (with a 2-minute safety buffer), saves the new token to disk, and never interrupts your workflow. A service account works the same way, except that each new token is minted from its key instead of a refresh token.
 
 ### Getting OAuth Credentials
 
@@ -139,7 +148,7 @@ vgoog automatically refreshes your access token when it expires (with a 2-minute
 4. Go to **Credentials** → **Create Credentials** → **OAuth Client ID**
 5. Application type → **Desktop app**
 6. Note down your Client ID and Client Secret
-7. Use the [OAuth Playground](https://developers.google.com/oauthplayground/) to obtain access + refresh tokens with the scopes below
+7. Run `vgoog login --client-id ... --client-secret ...`, or pick option 1 in the wizard, and approve the consent screen in your browser. Skip the OAuth Playground: tokens minted there belong to Google's client rather than yours, so refreshing them fails with `unauthorized_client`.
 
 ### Authentication
 
@@ -159,9 +168,12 @@ Credentials can also come from the environment, which is what makes this work st
 `vaulty secrets pull`:
 
 ```bash
-vgoog login              # reads VGOOG_CLIENT_ID / VGOOG_CLIENT_SECRET
+vgoog login                            # reads VGOOG_CLIENT_ID / VGOOG_CLIENT_SECRET, account "default"
 vgoog login --client-id ... --client-secret ...
+vgoog login --account personal         # adds or replaces the account named "personal"
 ```
+
+vgoog listens on a random `127.0.0.1` port, prints the consent URL in case the browser does not open, and gives up after five minutes. It always forces Google's consent screen so that a refresh token comes back. If Google still returns none, revoke vgoog at myaccount.google.com/permissions and log in again. When the login succeeds, vgoog saves the account under the `--account` name, makes it active, and prints `{"account":"default","ok":true}`.
 
 **2. Service account (Workspace only, deepest access)**
 
@@ -189,25 +201,27 @@ user consent cannot. Requires two things first:
 >
 > `vgoog` uses delegation, because Gmail is the point.
 
+The delegated login requests **all 17 scopes** from `vgoog scopes --all`. Google rejects the whole token request if even one of them is missing from the admin console entry, so authorise every one. The login also accepts `--account` (default `default`), labels the account `<subject> (delegated)`, and stores the whole key file inside `config.toml`. Wizard option 2 does the same job interactively, and it prints the scopes and the key's client id for you to paste into the admin console.
+
 **3. Paste tokens by hand** — offered by the wizard when you already have them.
 
 ### Restoring from the vault
 
 `vgoog` rebuilds itself from `~/.config/secrets.env` when it has no usable config of its own —
-written by `vaulty secrets pull`. Either credential kind restores:
+written by `vaulty secrets pull`. That covers both a missing `config.toml` and one that holds no working account. vgoog reads the file itself, so the variables do not need to be exported in your shell, and **`VGOOG_SECRETS_ENV`** points it at a different file. Either credential kind restores:
 
 ```
 VGOOG_SERVICE_ACCOUNT_KEY   the key file, minified to one line
 VGOOG_SUBJECTS              comma-separated addresses — ONE ACCOUNT EACH, first is the default
 ```
 
-or, for OAuth:
+Each subject becomes an account named after the part before the `@`, so `uri@yourdomain.com` becomes the account `uri`. For OAuth, the file needs these three values instead:
 
 ```
 VGOOG_CLIENT_ID  VGOOG_CLIENT_SECRET  VGOOG_REFRESH_TOKEN
 ```
 
-A delegated key wins when both are present. Nothing to run: the next `vgoog` command picks it up
+The OAuth values restore a single account named `default`. A delegated key wins when both are present. Add `VGOOG_STRATEGY=oauth` to the file to restore the OAuth account instead, or `VGOOG_STRATEGY=service_account` to refuse the OAuth fallback when the key is missing or unreadable. Nothing to run: the next `vgoog` command picks it up
 and writes its own config.
 
 ### Required Scopes
@@ -225,8 +239,7 @@ vgoog scopes --all   # 17, adding the Workspace-admin scopes a delegated key can
 vgoog doctor
 ```
 
-Reports every account, which kind of credential it holds, whether it is usable, and — the only
-check that means anything — whether it can actually reach Google right now.
+It prints one JSON object that lists every account, which kind of credential it holds, and whether it is usable. When a service account is configured, it also shows the key's email, client id and project. Last — the only check that means anything — it fetches the **active** account's Gmail profile to prove it can actually reach Google right now. `vgoog status` runs just that last check.
 
 ---
 
@@ -236,7 +249,7 @@ check that means anything — whether it can actually reach Google right now.
 vgoog
 ```
 
-That's it. You'll see the service selection screen. Navigate with your keyboard. Everything is a keystroke away.
+That's it. You'll see the service selection screen. Navigate with your keyboard. Everything is a keystroke away. Adding any command, such as `vgoog exec`, skips the TUI and prints JSON instead (see [Using the Command Line](#using-the-command-line)).
 
 ### Screenshots
 
@@ -257,9 +270,10 @@ That's it. You'll see the service selection screen. Navigate with your keyboard.
       Forwarding
       Send-As
       Delegates
+      Unified Search
 
  ────────────────────────────────────────────────────────────────
-  Selected Gmail.               up/dn Select  ^A Account  Esc
+  Selected Gmail.   ↑↓ Navigate  ⏎ Select  ^A Account  Esc Back  q Quit
 ```
 
 **Action View** — list + JSON preview side by side:
@@ -267,22 +281,19 @@ That's it. You'll see the service selection screen. Navigate with your keyboard.
 ```
   vgoog > Gmail                                      Work Gmail
  ────────────────────────────────────────────────────────────────
-  Items (1-25)                   | Preview
+  Items (more available)         | Preview
                                  |
-  > Weekly standup notes         | id: 18e4a2b3c5d6f7e8
-    from: alice@company.com      | threadId: 18e4a2b3c5d6...
-    Q3 Planning Doc - Review     | snippet: Hey team, here...
-    from: bob@company.com        | labelIds: [2 items]
-    Invoice #4521                | internalDate: 170801280...
-    from: billing@vendor.io      | sizeEstimate: 4521
-    Re: API migration timeline   | payload: {...}
-    from: charlie@company.com    |
-    Your flight confirmation     |
-    from: noreply@airline.com    |
+  > Message 18e4a2b3c5d6         | id: 18e4a2b3c5d6f7e8
+    Message 18e4a1f09b2c         | threadId: 18e4a2b3c5d6f7e8
+    Message 18e49d7e4a10         |
+    Message 18e49c02f3b7         |
+    Message 18e49a55c8e1         |
 
  ────────────────────────────────────────────────────────────────
-  Loaded 25 messages         up/dn Detail  d Del  n Next  Esc
+  20 messages loaded   ↑↓ Navigate  ⏎ Detail  d Delete  n Next  ^A Account  Esc Back
 ```
+
+Gmail's list call returns only message and thread ids, so each row shows an id until you press `Enter` to open the full message.
 
 **Input Form** — compose an email:
 
@@ -299,11 +310,13 @@ That's it. You'll see the service selection screen. Navigate with your keyboard.
     CC
     bob@company.com
 
+    BCC
+
     Body*
     Sounds good, let's sync Thursday.█
 
  ────────────────────────────────────────────────────────────────
-  Fill in fields              Tab Next  Enter Submit  Esc Cxl
+  Fill in fields              Tab Next Field  ⏎ Submit  Esc Cancel
 ```
 
 **Account Switcher** — `Ctrl+A` overlay:
@@ -324,7 +337,7 @@ That's it. You'll see the service selection screen. Navigate with your keyboard.
       Apps Script
 
  ────────────────────────────────────────────────────────────────
-  Switch account: up/dn select, Enter confirm, Esc cancel
+  Switch account: ↑↓ select, Enter confirm, Esc cancel
 ```
 
 **Detail View** — full JSON with syntax coloring:
@@ -348,7 +361,7 @@ That's it. You'll see the service selection screen. Navigate with your keyboard.
     "attendees": [
 
  ────────────────────────────────────────────────────────────────
-  Loaded event detail             up/dn scroll  Esc Back
+  Loaded event detail   ↑↓ Navigate  ⏎ Detail  d Delete  n Next  ^A Account  Esc Back
 ```
 
 ### Navigation Model
@@ -357,10 +370,10 @@ vgoog uses a simple hierarchical navigation:
 
 ```
 Service Select  →  Action Select  →  Action View / Input Form
-    (10 services)     (6-11 actions)    (list + preview | detail | form)
+    (10 services)     (6-12 actions)    (list + preview | detail | form)
 ```
 
-You can always go back with `Esc` or `q`. You never get lost.
+You can always go back with `Esc`, or with `q` outside input forms. You never get lost.
 
 ### Keybindings
 
@@ -369,7 +382,7 @@ You can always go back with `Esc` or `q`. You never get lost.
 | Key | Action |
 |-----|--------|
 | `Ctrl+C` | Quit immediately |
-| `Ctrl+A` | Toggle account switcher overlay |
+| `Ctrl+A` | Toggle account switcher overlay (not in input forms) |
 | `q` | Go back / quit (disabled in input forms) |
 
 #### Service & Action Selection
@@ -379,7 +392,7 @@ You can always go back with `Esc` or `q`. You never get lost.
 | `↑` / `k` | Move up |
 | `↓` / `j` | Move down |
 | `Enter` | Select |
-| `Esc` | Go back |
+| `Esc` | Go back, or quit from the service list |
 
 #### Action View (Lists & Detail)
 
@@ -398,7 +411,7 @@ You can always go back with `Esc` or `q`. You never get lost.
 |-----|--------|
 | `Tab` | Next field |
 | `Shift+Tab` | Previous field |
-| `Enter` | Submit form |
+| `Enter` | Submit form once every required (*) field is filled |
 | `Backspace` | Delete character |
 | `Esc` | Cancel |
 
@@ -411,9 +424,52 @@ You can always go back with `Esc` or `q`. You never get lost.
 
 ---
 
+## Using the Command Line
+
+Every command runs once, prints JSON, and exits, so scripts and agents can drive vgoog without the TUI.
+
+- **`vgoog exec <service> <action> ['<json>'] [--account <name>]`** runs one action and prints the result.
+- **`vgoog list`** prints every service and its action names as JSON.
+- **`vgoog status`** fetches the active account's Gmail profile, which proves the credentials work.
+- **`vgoog login`** adds or replaces an account without the wizard (see [Authentication](#authentication)).
+- **`vgoog doctor`** reports every account and whether the active one can reach Google (see [Checking it works](#checking-it-works)).
+- **`vgoog strategy [auto|service_account|oauth]`** prints the stored credential preference, or saves a new one (`sa` and `delegated` also mean `service_account`).
+- **`vgoog scopes [--all]`** prints the scopes to authorise as one space-separated line.
+- **`vgoog --version`** prints the version, which vaulty uses to check the installed binary against its skill manifest.
+
+### Running actions
+
+```bash
+vgoog list                                   # every service and action
+vgoog exec gmail list_messages '{"query":"from:samir is:unread","max_results":20}'
+vgoog exec gmail modify_message '{"id":"18f...","add_labels":["Label_12"]}'
+vgoog exec calendar list_events '{"timeMin":"2026-08-16T00:00:00Z","maxResults":10}'
+vgoog exec tasks list_task_lists --account personal
+```
+
+The service is one of `gmail`, `calendar`, `drive`, `sheets`, `docs`, `slides`, `forms`, `tasks`, `contacts` or `apps_script`. The JSON argument is optional and defaults to `{}`.
+
+A success prints `{"data": ..., "ok": true}` on stdout. A failure prints `{"error": "...", "ok": false}` on stderr, and vgoog exits with status 1.
+
+Arguments use snake_case names, but Google's camelCase spellings work too. vgoog converts `maxResults` to `max_results` before dispatch and keeps the original key as well. A few Google names map to different vgoog names: `addLabelIds` becomes `add_labels`, `removeLabelIds` becomes `remove_labels`, `messageIds` becomes `ids`, `labelIds` becomes `labels`, `q` becomes `query` and `userId` becomes `id`.
+
+`--account` runs that one call as a named account. If the call has to refresh that account's token, vgoog saves the config with that account marked active, so later calls without `--account` use it too.
+
+Sending mail needs the message already built. `send_message`, `create_draft` and `update_draft` take a `raw` field holding the full RFC 2822 message, base64url-encoded, and the TUI's Compose form is what builds that for you.
+
+`modify_message`, `modify_thread` and `batch_modify_messages` refuse to run without `add_labels` or `remove_labels`. Gmail's own error for that case reads like a missing permission, so vgoog names the missing argument instead.
+
+`exec` reaches every API method except Drive's `upload_file`, `update_file_content`, `download_file` and `export_file`, so file uploads still go through the TUI's Upload action.
+
+`vgoog strategy` saves its value in `config.toml`, and `doctor` reports it. No other code reads that saved value today. Which credential an account uses depends only on whether it has a `service_account` block, and what a vault restore builds depends on `VGOOG_STRATEGY` in secrets.env.
+
+The `SKILL.md` beside this README turns these commands into agent tools. vaulty mounts `google` (which runs `exec`), `google_actions` (which runs `list`) and `google_status` (which runs `status`), and Claude Code reads the same file as a skill.
+
+---
+
 ## Services
 
-### 📧 Gmail — 11 actions, 39 API methods
+### 📧 Gmail — 12 actions, 55 API methods
 
 | Action | What it does |
 |--------|-------------|
@@ -428,12 +484,13 @@ You can always go back with `Esc` or `q`. You never get lost.
 | **Forwarding** | Manage forwarding addresses |
 | **Send-As** | Manage send-as aliases |
 | **Delegates** | View and manage account delegates |
+| **Unified Search** | Run one Gmail search across every connected account, up to 10 hits each, tagged with the account |
 
 Full API coverage: messages (CRUD, batch modify, batch delete, attachments), threads (CRUD, modify), labels (CRUD), drafts (CRUD, send), settings (vacation, auto-forwarding, IMAP, POP, language), filters (CRUD), forwarding addresses, send-as aliases (CRUD, verify), delegates, profile, history.
 
 ---
 
-### 📅 Calendar — 9 actions, 24 API methods
+### 📅 Calendar — 9 actions, 26 API methods
 
 | Action | What it does |
 |--------|-------------|
@@ -451,7 +508,7 @@ Full API coverage: calendar list (CRUD), calendars (CRUD, clear), events (CRUD, 
 
 ---
 
-### 📁 Drive — 10 actions, 33 API methods
+### 📁 Drive — 10 actions, 34 API methods
 
 | Action | What it does |
 |--------|-------------|
@@ -470,7 +527,7 @@ Full API coverage: files (CRUD, upload with multipart, copy, download, export, m
 
 ---
 
-### 📊 Sheets — 8 actions, 19 API methods
+### 📊 Sheets — 8 actions, 17 API methods
 
 | Action | What it does |
 |--------|-------------|
@@ -536,7 +593,7 @@ Full API coverage: forms (create, get, batch update), responses (list, get), wat
 
 ---
 
-### ✅ Tasks — 6 actions, 15 API methods
+### ✅ Tasks — 6 actions, 14 API methods
 
 | Action | What it does |
 |--------|-------------|
@@ -551,7 +608,7 @@ Full API coverage: task lists (CRUD), tasks (CRUD, complete, uncomplete, move, c
 
 ---
 
-### 👥 Contacts — 6 actions, 21 API methods
+### 👥 Contacts — 6 actions, 20 API methods
 
 | Action | What it does |
 |--------|-------------|
@@ -566,7 +623,7 @@ Full API coverage: people (get, get me, batch get), contacts (list, search, CRUD
 
 ---
 
-### ⚡ Apps Script — 7 actions, 21 API methods
+### ⚡ Apps Script — 7 actions, 16 API methods
 
 | Action | What it does |
 |--------|-------------|
@@ -586,23 +643,33 @@ Full API coverage: projects (create, get, content get/update, metrics), versions
 
 ```
 src/
-├── main.rs              Entry point, setup wizard, TUI event loop
-├── config.rs            TOML config management (~/.config/vgoog/)
-├── auth.rs              OAuth2 token refresh (2-min buffer, auto-save)
+├── main.rs              Entry point, setup wizard, TUI event loop, CLI command handling
+├── config.rs            TOML config, accounts, strategy, restore from ~/.config/secrets.env
 ├── client.rs            HTTP client (GET/POST/PUT/PATCH/DELETE/multipart/download)
-├── error.rs             Error types (API, Auth, HTTP, RateLimit, NotFound)
+├── error.rs             Error types (API, Auth, HTTP, RateLimit, NotFound, Config)
+├── auth/
+│   ├── mod.rs           ensure_token — picks the OAuth or service account path per account
+│   ├── oauth.rs         Token refresh for both paths (2-min buffer, auto-save)
+│   ├── callback.rs      Browser sign-in: loopback redirect, code exchange
+│   ├── service_account.rs  Signed JWT assertion → access token (domain-wide delegation)
+│   └── scopes.rs        Every scope by service, shared by OAuth login and delegation
+├── cli/
+│   ├── mod.rs           clap commands: exec, list, status, login, doctor, strategy, scopes
+│   ├── exec.rs          Routes exec calls to a service, and the action map for `list`
+│   ├── args.rs          camelCase → snake_case argument normalising, plus aliases
+│   └── gmail.rs …       One JSON-args dispatcher per service (10 files)
 ├── api/
 │   ├── mod.rs           Module registry
-│   ├── gmail.rs         Gmail API v1 — 39 methods
-│   ├── calendar.rs      Calendar API v3 — 24 methods
-│   ├── drive.rs         Drive API v3 — 33 methods
-│   ├── sheets.rs        Sheets API v4 — 19 methods
+│   ├── gmail.rs         Gmail API v1 — 55 methods
+│   ├── calendar.rs      Calendar API v3 — 26 methods
+│   ├── drive.rs         Drive API v3 — 34 methods
+│   ├── sheets.rs        Sheets API v4 — 17 methods
 │   ├── docs.rs          Docs API v1 — 14 methods
 │   ├── slides.rs        Slides API v1 — 20 methods
 │   ├── forms.rs         Forms API v1 — 21 methods
-│   ├── tasks.rs         Tasks API v1 — 15 methods
-│   ├── people.rs        People API v1 — 21 methods
-│   └── apps_script.rs   Apps Script API v1 — 21 methods
+│   ├── tasks.rs         Tasks API v1 — 14 methods
+│   ├── people.rs        People API v1 — 20 methods
+│   └── apps_script.rs   Apps Script API v1 — 16 methods
 └── ui/
     ├── mod.rs           UI module registry
     ├── app.rs           App state, 10 services, 5 screens, navigation
@@ -618,8 +685,9 @@ src/
 - **`serde_json::Value` as the lingua franca.** API responses are returned as raw JSON values. This keeps the type surface small, avoids 500 struct definitions for 10 different APIs, and lets users browse the actual API response in the detail view.
 - **Async all the way down.** Tokio runtime, async HTTP client, async token refresh. The TUI never blocks on I/O.
 - **Multi-account from day one.** Every account is a named profile in a single TOML config file. Switching accounts is a single `Ctrl+A` hotkey. Token refresh happens per-account transparently.
-- **One-time setup, zero friction.** Paste your OAuth credentials once during setup. Token refresh happens automatically forever after — you never touch tokens again.
-- **Single binary, zero runtime dependencies.** Compiles with rustls (no OpenSSL), LTO, single codegen unit, stripped symbols. The result is a static 3.4MB binary that runs anywhere.
+- **One-time setup, zero friction.** Sign in once in the browser, or hand vgoog a service account key once. OAuth tokens refresh automatically forever after, and a service account mints its own, so you never touch tokens again.
+- **Single binary, zero runtime dependencies.** Compiles with rustls (no OpenSSL), LTO, single codegen unit, stripped symbols. The result is a static 4.4MB binary that runs anywhere.
+- **One scope list for both sign-in paths.** `auth/scopes.rs` feeds the OAuth consent URL and the admin console's delegation entry, so the two can never disagree.
 
 ---
 
@@ -638,6 +706,8 @@ vgoog surfaces errors transparently in the status bar:
 
 Errors are never swallowed. If something fails, you see exactly what Google told us.
 
+In command-line mode the error arrives as `{"error":"...","ok":false}` on stderr, and vgoog exits with status 1. Service account token failures also carry a hint: `unauthorized_client` means the admin console has not authorised the key's client id for the requested scopes, and `invalid_grant` means delegation is off for the key or the user is not in the Workspace.
+
 ---
 
 ## Build
@@ -646,7 +716,7 @@ Errors are never swallowed. If something fails, you see exactly what Google told
 # Development (fast compile, debug symbols)
 cargo build
 
-# Release (optimized, LTO, stripped — 3.4MB)
+# Release (optimized, LTO, stripped — 4.4MB)
 cargo build --release
 
 # Run directly
@@ -680,20 +750,22 @@ strip = true        # Strip debug symbols
 | `uuid` | Generate unique IDs for Slides/Drive objects |
 | `mime_guess` | Auto-detect file MIME types for uploads |
 | `dirs` | Cross-platform config directory resolution |
-| `arboard` | Clipboard support |
+| `clap` | Command-line parsing for `exec`, `login` and the other commands |
+| `jsonwebtoken` | Signs the JWT assertion a service account trades for a token |
+
+Cargo.toml also declares `arboard`, `tui-textarea`, `textwrap` and `unicode-width`, but no code uses them yet.
 
 ---
 
 ## Platform Support
 
-vgoog runs on **Windows, Linux, and macOS** with no platform-specific code.
+vgoog runs on **Windows, Linux, and macOS**. Its only platform-specific code picks the command that opens your browser during sign-in: `open` on macOS, `xdg-open` on Linux and `explorer` on Windows.
 
 | Component | Windows | Linux | macOS |
 |-----------|---------|-------|-------|
 | Terminal UI | Console API via crossterm | termios | termios |
 | Config path | `%APPDATA%\vgoog` | `~/.config/vgoog` | `~/Library/Application Support/vgoog` |
 | TLS / HTTP | rustls (pure Rust, no OpenSSL) | rustls | rustls |
-| Clipboard | Native Win32 | X11 / Wayland | Native AppKit |
 | File paths | Handled by `PathBuf` | POSIX | POSIX |
 
 Every dependency was chosen to be cross-platform. `reqwest` uses `rustls-tls` so there is no OpenSSL dependency to wrestle with on any OS. `crossterm` talks directly to the Windows console API — no WSL or MSYS2 required. `dirs` resolves config directories correctly per-platform.
@@ -706,14 +778,15 @@ Every dependency was chosen to be cross-platform. `reqwest` uses `rustls-tls` so
 
 | Metric | Value |
 |--------|-------|
-| Lines of Rust | 6,692 |
-| API methods | 219 |
+| Lines of Rust | 8,748 |
+| API methods | 237 |
 | Google services | 10 |
-| TUI actions | 79 |
-| Auth method | Manual Token Entry (auto-refresh) |
+| TUI actions | 80 |
+| CLI actions (`vgoog exec`) | 233 |
+| Auth methods | Browser sign-in, service account with domain-wide delegation, or pasted tokens |
 | Multi-account | Yes (unlimited accounts) |
-| Binary size (release) | ~3.5 MB |
-| Dependencies | 12 direct |
+| Binary size (release) | ~4.4 MB |
+| Dependencies | 21 direct |
 | Compiler warnings | 0 |
 
 ---

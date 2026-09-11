@@ -11,7 +11,8 @@ No AI anywhere. The same input always makes the same request.
 cargo install --path .
 ```
 
-Needs Rust 1.70+.
+Run it from inside the `phog` folder. It needs **Rust 1.88** or newer, because the locked
+dependencies require it.
 
 ## Keys
 
@@ -27,6 +28,9 @@ export POSTHOG_PROJECT_ID="12345"
 export POSTHOG_APP_HOST="https://us.posthog.com"   # or https://eu.posthog.com
 ```
 
+**`POSTHOG_APP_HOST`** is optional. It defaults to `https://us.posthog.com`, so you only set it
+for the EU cloud or a self-hosted instance.
+
 Load it from `~/.zshrc` (once, covers every tool):
 
 ```sh
@@ -41,13 +45,17 @@ phog config
 
 ### The alternative: a config file
 
-Run `phog setup`, or just `phog` with nothing configured. It takes the key and the
-project, proves them against the API, and writes **`~/.config/phog/config.toml`** `600`.
-The environment wins over the file when both are set.
+Run `phog setup`, or just `phog` with nothing configured. It asks for the app host, the key
+and the project id, proves them against the API, and writes **`~/.config/phog/config.toml`**
+with mode `600`. When **`XDG_CONFIG_HOME`** is set, the file goes to
+`$XDG_CONFIG_HOME/phog/config.toml` instead. The environment wins over the file when both are
+set, one value at a time.
 
 ## Usage
 
-Run `phog` alone for a menu. Every path in the menu is also a command.
+Run `phog` alone for a menu. Every path in the menu is also a command. The menu's file picker
+lists the YAML files in **`dashboards/`** under the current directory, so run it from the folder
+that holds them.
 
 ```sh
 phog query "select event, count() from events where timestamp > now() - interval 1 day group by event order by count() desc"
@@ -55,19 +63,40 @@ phog query --json < some.sql
 
 phog events --fingerprint 3f9a…            # one person, across cookies and the agent
 phog events --email someone@company.com --since -7d
+phog events --distinct-id abc123 --limit 50
 phog persons "someone@"                      # search, plus a link to each person page
 
-phog dashboards                              # list
+phog dashboards                              # lists them, same as `dashboards list`
 phog dashboards show "Ask Croissant"
+phog dashboards check dashboards/ask-croissant.yaml   # parses the file and needs no key
 phog dashboards diff dashboards/ask-croissant.yaml
 phog dashboards apply dashboards/ask-croissant.yaml
 phog dashboards export 42 --out dashboards/growth.yaml
+phog dashboards delete 42                    # asks first, and --yes skips the question
 
-phog call GET insights/?limit=5              # anything the API has
+phog call GET 'insights/?limit=5'            # anything the API has
 phog call PATCH dashboards/42/ '{"pinned": true}'
 ```
 
-`--json` on any command prints what the API returned instead of a table.
+**`--json`** prints JSON instead of a table for `query`, `events`, `persons`, `dashboards list`,
+`dashboards show` and `dashboards check`. For `query` and `events`, each row comes out as an
+object keyed by column name. `call` always prints JSON, and `export` always writes YAML.
+
+`events` needs one of **`--fingerprint`**, **`--email`** or **`--distinct-id`**. When you pass more
+than one, the fingerprint wins over the email and the email wins over the distinct id. A
+fingerprint matches events that carry it as a property and events from the distinct id
+`fp:<fingerprint>`. **`--since`** reads like PostHog's own ranges (`-24h`, `-7d`, `-2w`, `-3m` for
+months, `-1y`) and defaults to `-90d`. **`--limit`** defaults to 200 rows. Under the table, it
+prints a person link for up to five of the distinct ids it found.
+
+`persons` runs two lookups and merges them, and **`--limit`** (default 20) caps each one.
+
+`show`, `export` and `delete` find a dashboard by its id, its name or its slug, and otherwise by
+the first name that contains what you typed. Name matching ignores case. `export` prints the
+YAML to stdout when you leave out **`--out`**.
+
+`call` takes a path under `/api/projects/<id>/`, or a full path that starts with `/api/`. It asks
+before it sends anything other than a GET, and **`--yes`** skips that question.
 
 ## Dashboards as files
 
@@ -75,6 +104,10 @@ A dashboard is one YAML file. `phog dashboards apply` makes PostHog match it: th
 created or updated, each insight is created or updated, insights that left the file are
 removed, and tiles are placed. Run it again and nothing happens. That is the whole point —
 the file is the truth and the UI is a view of it.
+
+`diff` (or `apply --dry-run`) prints the changes apply would make and stops. `check` reads the
+file without contacting PostHog and needs no key, and with `--json` it prints every query node
+apply would send.
 
 ```yaml
 name: Ask Croissant
@@ -125,7 +158,7 @@ Five insight types:
 |---|---|---|
 | `trends` | `series`, optional `interval`, `display`, `breakdown` | a line, bar, pie or table over time |
 | `number` | one `series` | a single big number |
-| `funnel` | two or more `series` steps, optional `window` | a step funnel |
+| `funnel` | two or more `series` steps, optional `window` and `breakdown` | a step funnel |
 | `hogql` | `query` | a table from SQL |
 | `raw` | `raw`, a complete PostHog query node | anything the shorthands cannot say |
 
@@ -134,12 +167,21 @@ A series is `event`, plus `name`, `math` (`total`, `dau`, `unique_session`, `sum
 and `type` (`event`, `person`, or `hogql` where `key` is the whole expression). `layout` is
 `x`, `y`, `w`, `h` on a 12-column grid.
 
+Every insight can also set a `description`, its own `date_from`, and `filters` that apply to the
+whole insight. An insight without a `date_from` uses the dashboard's, and `-30d` when neither is
+set. A filter's `operator` defaults to `exact` and its `type` defaults to `event`. A funnel
+`window` is a number and a unit (`30m`, `2h`, `14d`, `1w` or `1M`) and defaults to `14d`. A
+trends `interval` defaults to `day`.
+
 ### How it finds things again
 
-The dashboard is tagged `phog:<slug>` and every insight `phog:<slug>:<key>`. Those tags are the
-identity: rename anything freely, the next apply still finds it. A dashboard with the same
-`name` but no tag is adopted rather than duplicated, so a board somebody built by hand can be
-taken under file control by exporting it, saving the file, and applying.
+The dashboard is tagged `phog` and `phog:<slug>`, and every insight is tagged `phog`,
+`phog:<slug>:<key>` and the dashboard's own `tags`. Those tags are the identity: rename
+anything freely, the next apply still finds it. A dashboard with the same `name` but no tag
+is adopted rather than duplicated. Its hand-made insights are not adopted, because they carry
+no tag. If you export a hand-built board and apply the file, apply creates tagged copies of
+those insights beside the originals and leaves the originals alone, so you delete the
+originals by hand once the copies look right.
 
 `export` turns a dashboard back into a file. Managed insights keep their keys; hand-made ones
 get a key from their name. Anything the shorthands cannot express comes back as `raw`, which
@@ -149,7 +191,8 @@ round-trips exactly.
 
 It does not delete dashboards on apply, only insights that carry its own tag and left the
 file — and `--no-prune` keeps even those. It never touches insights it did not make. Deleting
-a dashboard is its own command and asks first.
+a dashboard is its own command. It asks first unless you pass `--yes`, and it leaves the
+dashboard's insights in place. Both kinds of removal work by setting PostHog's `deleted` flag.
 
 ## Notes on the API
 

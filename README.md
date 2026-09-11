@@ -9,7 +9,7 @@ Personal command-line tools. One repo, seven independent tools, no shared build.
 | [**vgoog**](vgoog/README.md) | All of Google Workspace — Gmail, Calendar, Drive, Sheets, Docs | Rust | ✅ |
 | [**pocket**](pocket/README.md) | Export and search recorded conversations | Bun / TypeScript | ✅ |
 | [**phog**](phog/README.md) | PostHog — HogQL, people by fingerprint, dashboards as files | Rust | ✅ |
-| [**lgit**](lgit/README.md) | AI-written git commit messages | Rust | — |
+| [**lgit**](lgit/README.md) | AI-written commit messages, and a plain-English `status` | Rust | — |
 | **ccx** | Claude Code launcher with auto-named sessions | Bash | — |
 
 Each tool stands alone — install only what you want.
@@ -42,33 +42,61 @@ accounts, transactions, payments, cards, recipients, treasury, invoicing, webhoo
 Deterministic: no AI anywhere, the same input always makes the same request.
 
 ```sh
-merc accounts                          # balances
-merc transactions --status=pending     # any operation as <group> <command>
-merc call getAccountCards accountId=…  # or by Mercury's own operation id
-merc send                              # guided payment, with a confirmation
+merc accounts                              # every account and its balance
+merc transactions -n 20 --status=pending   # a group runs its list command, with its flags
+merc call getAccountCards accountId=…      # or any operation by Mercury's own id
+merc send                                  # guided payment, confirmed before it sends
+merc config                                # where the token comes from, checked live
 ```
 
 The commands are **generated from Mercury's OpenAPI spec at build time**, so coverage is
 a fact rather than a promise, and a new Mercury endpoint becomes a working command by
 refetching the spec and rebuilding. Amounts are parsed into integer cents and never
-touch a float. Full docs: [merc/README.md](merc/README.md).
+touch a float. An optional read-only token in `MERCURY_READ_KEY` handles every read,
+so the main token is only used to move money. Full docs: [merc/README.md](merc/README.md).
 
 ## agree
 
 Everything the [Agree API](https://secure.agree.com/documentation) exposes — invoices,
-agreements, contacts, reports — three ways: shortcuts, direct calls to all 38
-operations, and a conversational agent.
+agreements, contacts, customers, templates, webhooks and reports. You can reach it three
+ways: shortcuts, direct calls to all 38 operations, and plain English.
 
 ```sh
-agree invoices --status due            # shortcut
-agree call delete_invoice id=abc       # any operation directly
-agree agent                            # chat, with follow-ups
+agree invoices --status due,failed        # shortcut, filtered by status
+agree call mark_invoice_paid --yes id=…   # any operation directly
+agree 'invoice Samir $5000 every week'    # plain English, then open for follow-ups
+agree agent                               # open a conversation
+agree model                               # pick the AI provider and model
 ```
+
+**`--yes` must come before the `key=value` pairs**, because `call` reads everything after
+the first pair as another pair. Scripts need `--yes`, since the confirmation prompt needs
+a terminal.
 
 The agent plans and calls tools one at a time, but never touches the API itself and
 never sees your key — and every change stops for confirmation. Amounts are handled
 in integer cents throughout, because the API bills in cents and sending `50` for
 "$50" charges 50 cents. Full docs: [agree/README.md](agree/README.md).
+
+## vgoog
+
+All of Google Workspace — Gmail, Calendar, Drive, Sheets, Docs, Slides, Forms, Tasks,
+Contacts and Apps Script — as a terminal UI and a JSON command line, across several
+Google accounts.
+
+```sh
+vgoog                  # open the TUI, or the setup wizard if nothing is configured
+vgoog login            # browser sign-in with a Desktop OAuth client
+vgoog doctor           # accounts, credential kinds, and whether Google is reachable
+vgoog list             # every service and its action names
+vgoog exec gmail list_messages '{"query":"is:unread","max_results":20}'   # one action, JSON back
+```
+
+It needs a one-time setup in Google Cloud: enable the Workspace APIs, create a **Desktop
+app** OAuth client, and run `vgoog login`. On Workspace you can use a service account
+with domain-wide delegation instead. vgoog can also rebuild its accounts from `VGOOG_*`
+keys that it reads straight out of `~/.config/secrets.env`.
+Full docs: [vgoog/README.md](vgoog/README.md).
 
 ## pocket
 
@@ -76,31 +104,62 @@ Pulls recordings from the [Pocket AI API](https://docs.heypocketai.com/docs/api)
 searches them in natural language.
 
 ```sh
-pocket export all              # pull everything down
-pocket --search "what did we decide about pricing"
+pocket                                  # arrow-key menu
+pocket list                             # id, date and title of each recording
+pocket export all                       # export recordings and re-index search
+pocket search what did we decide about pricing
+pocket search "pricing" --fast --json   # skip reranking, print JSON for scripts
 ```
 
-Search runs **entirely on-device** via [qmd](https://github.com/tobi/qmd) — hybrid
-keyword + vector search with local reranking. Nothing is uploaded.
+Search runs **entirely on-device** via [qmd](https://github.com/tobi/qmd), which does
+hybrid keyword and vector search with local reranking. Nothing is uploaded. qmd runs
+through `npx`, so search needs Node as well as Bun, and the first search downloads
+about 2GB of models.
 
-Exports live in `~/dev/pocket-exports/`. Full docs: [pocket/README.md](pocket/README.md).
+**`list` and `export all` only see the first 100 recordings**, because pocket reads a
+single page from the API.
+
+Exports live in `~/dev/pocket-exports/`, one folder per recording, unless you set
+`POCKET_EXPORT_DIR`. Full docs: [pocket/README.md](pocket/README.md).
+
+## phog
+
+[PostHog](https://posthog.com/docs/api) from the terminal. It runs HogQL queries, looks
+people up by fingerprint, email or distinct id, and keeps dashboards as YAML files that
+apply the same way every time.
+
+```sh
+phog query "select event, count() from events group by event"  # HogQL, printed as a table
+phog events --fingerprint 3f9a…                                # one person's timeline across cookies
+phog dashboards diff dashboards/ask-croissant.yaml             # what apply would change
+phog dashboards apply dashboards/ask-croissant.yaml            # make PostHog match the file
+phog call GET 'insights/?limit=5'                              # any API endpoint directly
+```
+
+`call` asks before any write unless you pass `--yes`, and deleting only sets PostHog's
+`deleted` flag. Full docs: [phog/README.md](phog/README.md).
 
 ## lgit
 
-Stage your changes, let an AI write the commit message. Supports Anthropic, OpenAI,
-Gemini, and local Ollama, with optional GPG signing and auto-push.
+Stage your changes and let an AI write the commit message. You can accept it, edit it,
+ask about the change, or regenerate it, and then lgit commits, pushes and prints a PR
+link. It works with your Claude Code subscription, Anthropic, OpenAI, Gemini, or a
+local Ollama, and it can sign commits with GPG.
 
 ```sh
-git add -A
-lgit
+git add -A && lgit    # write the message for what's staged, then commit and push
+lgit status           # what's going on here, what could bite you, what to do next
+lgit --root           # commit every repo in this folder, messages written in parallel
+lgit --tag v1.0.0     # commit, then tag and push the tag
+lgit --model          # switch provider or model
 ```
 
 Full docs: [lgit/README.md](lgit/README.md).
 
 ## ccx
 
-Claude Code with permissions bypassed and remote control on, plus automatic session
-naming so parallel sessions are tellable apart.
+Claude Code with permissions bypassed and remote control on. It also names each
+session automatically, so parallel sessions are easy to tell apart.
 
 ```sh
 cd dev/_www/croissant/api && ccx
@@ -108,34 +167,45 @@ cd dev/_www/croissant/api && ccx
 ```
 
 The name is the **last two path components** plus a counter. A second session in the
-same folder becomes `croissant-api-001`, a third `002`.
+same folder becomes `croissant-api-001`, and a third becomes `002`.
 
-Numbers come from Claude's live session registry at `~/.claude/sessions/`, so:
-
-- Closing `000` frees that number for the next session — they stay small
-- A session killed without cleanup has its number reclaimed automatically
+**A number is never reused.** ccx treats a name as taken when a running session holds
+it (from `~/.claude/sessions/`) or when it has ever appeared as a title in any
+transcript under `~/.claude/projects/`. Ended sessions keep their names in the
+`/resume` picker without collisions, and a number only comes free again when its
+transcript is deleted.
 
 Pass your own `--name` to opt out. All other args go straight through to `claude`.
 
 ```sh
-ccx details          # every ended session of this folder, one line each
+ccx details [dir]    # every session of a folder (default: here), with a summary
 ```
 
-Each line is the start date, the session name and a one-sentence summary. The
-summary comes from `claude -p` on your normal login, so no API key is needed.
-Summaries are cached in `~/.config/ccx/summaries/` and only redone when a session
-has grown since, so the first run takes a while and reruns are instant.
+Each session gets its start date and name on one line, with a one-sentence summary
+indented under it. The summary comes from `claude -p --model haiku` on your normal
+login, so no API key is needed. Running sessions are listed but not summarized,
+because they are still changing.
+
+Summaries are cached in `~/.config/ccx/summaries/`, keyed on the transcript's last
+timestamp. A resumed session is summarized again, and a failed call is not cached,
+so the next run retries it. The first run takes a while and reruns are instant.
 
 ```sh
-ccx cleanup          # renumber ended sessions so no two share a title
-ccx delete <name>    # delete one session by its name, from any folder
-ccx clear-all        # delete every ended session of this folder
+ccx cleanup [dir]     # renumber ended sessions so no two share a title
+ccx cleanup --all     # the same, for every project Claude knows about
+ccx delete <name...>  # delete sessions by name, from any folder
+ccx clear-all [dir]   # delete every ended session of a folder
+ccx help              # print this list
 ```
+
+**Running sessions are never touched.** `cleanup` skips them and keeps their names
+reserved, `delete` leaves them alone, and `clear-all` keeps them along with the
+folder's `memory/`. Rerunning `cleanup` on a folder that is already tidy writes nothing.
 
 ## Install
 
 ```sh
-# pocket — needs bun
+# pocket — needs bun, plus node for search
 chmod +x pocket/pocket.ts
 ln -s "$PWD/pocket/pocket.ts" /opt/homebrew/bin/pocket
 
@@ -143,20 +213,24 @@ ln -s "$PWD/pocket/pocket.ts" /opt/homebrew/bin/pocket
 chmod +x ccx/ccx
 ln -s "$PWD/ccx/ccx" /opt/homebrew/bin/ccx
 
-# lgit — needs rust 1.70+
+# lgit — needs rust 1.83+, and gpg installed even for unsigned commits
 cargo install --path lgit
 
-# agree — needs rust 1.70+
+# agree — needs rust 1.87+
 cargo install --path agree
 
-# merc — needs rust 1.70+
+# merc — needs rust 1.88+
 cargo install --path merc
 
-# vgoog — needs rust 1.70+
+# vgoog — needs rust 1.85+
 cargo install --path vgoog
+
+# phog — needs rust 1.88+
+cargo install --path phog
 ```
 
-Symlinks rather than copies, so edits to the source are live immediately.
+pocket and ccx are symlinked rather than copied, so edits to them are live immediately.
+The Rust tools are compiled, so rerun `cargo install` after you change one.
 
 ## API keys
 
@@ -170,12 +244,15 @@ touch ~/.config/secrets.env && chmod 600 ~/.config/secrets.env
 Put your keys in it:
 
 ```sh
-export MERCURY_API_KEY="secret-token:..."  # merc
-export AGREE_API_KEY="agr_..."        # agree
-export POCKET_APP_KEY="pk_..."        # pocket
-export ANTHROPIC_API_KEY="sk-ant-..." # lgit, agree (AI features)
-export OPENAI_API_KEY="sk-..."        # alternative AI provider
-export GOOGLE_API_KEY="..."           # alternative AI provider
+export MERCURY_API_KEY="secret-token:..."   # merc
+export MERCURY_READ_KEY="secret-token:..."  # merc, optional read-only token for reads
+export AGREE_API_KEY="agr_..."              # agree
+export POCKET_APP_KEY="pk_..."              # pocket
+export POSTHOG_PERSONAL_API_KEY="phx_..."   # phog, the personal key, not the project key
+export POSTHOG_PROJECT_ID="12345"           # phog, the number in the project's URL
+export ANTHROPIC_API_KEY="sk-ant-..."       # lgit, agree (AI features)
+export OPENAI_API_KEY="sk-..."              # alternative AI provider
+export GOOGLE_API_KEY="..."                 # alternative AI provider
 ```
 
 Load it once from `~/.zshrc`:
@@ -184,20 +261,31 @@ Load it once from `~/.zshrc`:
 [ -f ~/.config/secrets.env ] && source ~/.config/secrets.env
 ```
 
-Open a new terminal and every tool picks them up. **Environment always wins over a
-tool's own config file**, so this one file overrides everything.
+Open a new terminal and every tool picks them up. **Environment wins over a tool's own
+config file**, so this one file overrides almost everything. There are two exceptions:
+
+- **agree's AI key** set as `api_key` under `[ai]` in agree's config beats the environment variable.
+- **lgit only reads its key from its own config.** `lgit --setup` copies the environment
+  variable in, so rerun it after you change a key. The Claude Code provider needs no key.
 
 ### Where each tool looks
 
 | Tool | Environment variable | Config file fallback |
 |---|---|---|
-| **merc** | `MERCURY_API_KEY` | `~/.config/merc/config.toml` |
+| **merc** | `MERCURY_API_KEY`, `MERCURY_READ_KEY` (optional), `MERCURY_SANDBOX` | `~/.config/merc/config.toml` |
 | **agree** | `AGREE_API_KEY` | `~/.config/agree/config.toml` |
 | **pocket** | `POCKET_APP_KEY` | `~/.config/pocket/key` |
-| **lgit** | provider's own var (`ANTHROPIC_API_KEY`, …) | `~/.config/lgit/config.toml` |
+| **phog** | `POSTHOG_PERSONAL_API_KEY`, `POSTHOG_PROJECT_ID`, `POSTHOG_APP_HOST` (optional) | `~/.config/phog/config.toml` |
+| **vgoog** | reads its `VGOOG_*` keys from `secrets.env` itself; `VGOOG_CONFIG_DIR` moves its config | `~/Library/Application Support/vgoog/config.toml` on macOS |
+| **lgit** | none when committing; `lgit --setup` copies `ANTHROPIC_API_KEY`, … into the config | `~/.config/lgit/config.toml` |
 | **ccx** | — | — |
 
-Every config file lives in `~/.config/<tool>/` and is written `600`.
+Every config file lives in `~/.config/<tool>/`, or under `$XDG_CONFIG_HOME` when that is set.
+The tools write their config files `600`; a file you create by hand keeps whatever mode you give it.
+
+**vgoog is the exception to both.** Its config sits in the OS config directory, which is
+`~/Library/Application Support/vgoog/` on macOS, and it is written with default
+permissions even though it holds refresh tokens and the service-account key.
 
 ### Rules
 
