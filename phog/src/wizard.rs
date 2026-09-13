@@ -17,7 +17,7 @@ pub fn run(config: &Config) -> Result<()> {
     }
     let client = Client::new(config)?;
 
-    let actions = ["Run a HogQL query", "Look someone up", "Dashboards", "Config", "Quit"];
+    let actions = ["Run a HogQL query", "Look someone up", "Dashboards", "Journey counts", "Config", "Quit"];
     loop {
         let pick =
             Select::new().with_prompt("What do you want to do?").items(&actions).default(0).interact()?;
@@ -25,7 +25,8 @@ pub fn run(config: &Config) -> Result<()> {
             0 => query(&client)?,
             1 => lookup(&client)?,
             2 => dashboards_menu(&client)?,
-            3 => crate::show_config(config)?,
+            3 => journey_counts(&client)?,
+            4 => crate::show_config(config)?,
             _ => return Ok(()),
         }
     }
@@ -90,6 +91,19 @@ fn dashboards_menu(client: &Client) -> Result<()> {
         }
         _ => Ok(()),
     }
+}
+
+/// The same thing `phog journeys` does, with the arguments asked for one by one.
+fn journey_counts(client: &Client) -> Result<()> {
+    let months: usize = Input::new().with_prompt("How many months").default(12).interact_text()?;
+    let paths: String = Input::new()
+        .with_prompt("Route patterns for $pageview, space-separated (blank for none)")
+        .allow_empty(true)
+        .interact_text()?;
+    let out: String =
+        Input::new().with_prompt("Write to (blank prints it)").allow_empty(true).interact_text()?;
+    let paths = paths.split_whitespace().map(str::to_string).collect();
+    crate::journeys::run(client, months, paths, Some(out).filter(|o| !o.trim().is_empty()))
 }
 
 fn pick_file() -> Result<String> {

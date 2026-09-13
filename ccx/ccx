@@ -7,7 +7,9 @@
 # that ever appeared in a transcript counts as taken, so ended sessions keep
 # their name in the /resume picker without collisions.
 #
-#   ccx [claude args...]        start a session (pass --name to opt out of naming)
+#   ccx [claude args...]        resume the last active session of cwd that is not
+#                               running anywhere, or start a new one if none is left
+#   ccx new [claude args...]    start a new session (pass --name to opt out of naming)
 #   ccx details [dir]           list ended sessions of dir (default: cwd), one
 #                               line each with an AI one-sentence summary
 #   ccx cleanup [dir]           renumber ended sessions of dir (default: cwd)
@@ -266,6 +268,53 @@ delete() {
   for name in "$@"; do delete_session "$name"; done
 }
 
+# The ended session of cwd with the newest message. It sorts on the last
+# timestamp rather than file mtime, since cleanup appends titles to ended
+# transcripts and would bump them to the top. A transcript with no messages
+# yet has nothing to resume and is skipped.
+last_ended() {
+  local dir live file id seen
+  dir=$(project_dir "$(pwd -P)")
+  live=$(live_field sessionId)
+  for file in "$dir"/*.jsonl; do
+    [ -e "$file" ] || continue
+    id=${file##*/}
+    id=${id%.jsonl}
+    grep -qxF "$id" <<<"$live" && continue
+    seen=$(last_seen "$file")
+    [ -n "$seen" ] && printf '%s %s\n' "$seen" "$id"
+  done | sort | tail -1 | cut -d' ' -f2
+}
+
+# Resumes under the session's own title, so the remote-control name matches
+# the /resume picker. A session started by plain claude has no title and gets
+# a fresh one the same way a new ccx session would. Returns only when there is
+# nothing to resume.
+resume_last() {
+  local id name
+  id=$(last_ended)
+  [ -n "$id" ] || return
+  name=$(title_of "$(project_dir "$(pwd -P)")/$id.jsonl")
+  name=${name:-$(pick_name "$(base_name)" "$(taken_names)")}
+  exec claude --dangerously-skip-permissions --remote-control "$name" --name "$name" --resume "$id" "$@"
+}
+
+has_name() {
+  local arg
+  for arg in "$@"; do
+    case "$arg" in -n | --name | --name=*) return 0 ;; esac
+  done
+  return 1
+}
+
+# A --name from the caller wins over the generated one.
+start_new() {
+  local name
+  has_name "$@" && exec claude --dangerously-skip-permissions --remote-control "$@"
+  name=$(pick_name "$(base_name)" "$(taken_names)")
+  exec claude --dangerously-skip-permissions --remote-control "$name" --name "$name" "$@"
+}
+
 # The usage block lives in the header comment above, so the docs and the help
 # text are the same lines.
 help() { sed -n 's/^#   //p' "$0"; }
@@ -275,16 +324,9 @@ case "$1" in
   cleanup) shift; cleanup "$@"; exit ;;
   delete) shift; delete "$@"; exit ;;
   clear-all) shift; clear_all "$@"; exit ;;
+  new) shift; start_new "$@" ;;
   help | -h | --help) help; exit ;;
 esac
 
-for arg in "$@"; do
-  case "$arg" in
-    -n | --name | --name=*)
-      exec claude --dangerously-skip-permissions --remote-control "$@"
-      ;;
-  esac
-done
-
-NAME=$(pick_name "$(base_name)" "$(taken_names)")
-exec claude --dangerously-skip-permissions --remote-control "$NAME" --name "$NAME" "$@"
+has_name "$@" || resume_last "$@"
+start_new "$@"

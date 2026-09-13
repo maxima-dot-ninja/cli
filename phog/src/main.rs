@@ -1,6 +1,7 @@
 mod client;
 mod config;
 mod dashboards;
+mod journeys;
 mod spec;
 mod view;
 mod wizard;
@@ -64,6 +65,18 @@ enum Command {
     Dashboards {
         #[command(subcommand)]
         command: Option<DashboardCommand>,
+    },
+    /// Monthly counts per event, as JSON the website's journey map reads: phog journeys --months 12 --path /pricing --out counts.json
+    Journeys {
+        /// How many months back, ending on the current month
+        #[arg(long, default_value_t = 12)]
+        months: usize,
+        /// A route pattern whose `$pageview` count you want, `:param` for a segment that varies. Repeat it.
+        #[arg(long = "path")]
+        paths: Vec<String>,
+        /// File to write; stdout when omitted
+        #[arg(long)]
+        out: Option<String>,
     },
     /// Call any endpoint directly: phog call GET insights/ ; phog call PATCH dashboards/12/ '{"name":"x"}'
     Call {
@@ -161,6 +174,10 @@ fn main() -> Result<()> {
                 DashboardCommand::Delete { dashboard, yes } => delete(&client, &dashboard, yes),
                 DashboardCommand::Check { file } => check(&file, cli.json),
             }
+        }
+        Some(Command::Journeys { months, paths, out }) => {
+            let client = Client::new(&config)?;
+            journeys::run(&client, months, paths, out)
         }
         Some(Command::Call { method, path, body, yes }) => {
             let client = Client::new(&config)?;

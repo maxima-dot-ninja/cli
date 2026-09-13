@@ -74,6 +74,8 @@ phog dashboards apply dashboards/ask-croissant.yaml
 phog dashboards export 42 --out dashboards/growth.yaml
 phog dashboards delete 42                    # asks first, and --yes skips the question
 
+phog journeys --months 12 --path /pricing --path '/careers/:id' --out counts.json
+
 phog call GET 'insights/?limit=5'            # anything the API has
 phog call PATCH dashboards/42/ '{"pinned": true}'
 ```
@@ -97,6 +99,28 @@ YAML to stdout when you leave out **`--out`**.
 
 `call` takes a path under `/api/projects/<id>/`, or a full path that starts with `/api/`. It asks
 before it sends anything other than a GET, and **`--yes`** skips that question.
+
+## Journey counts
+
+`phog journeys` writes one JSON document with a count per event per month, for a page that
+wants to show numbers without holding a key. It runs two HogQL queries: every named event
+(anything not starting with `$`) grouped by month, and `$pageview` grouped by month for each
+`--path` you pass. A path is a route pattern: `:param` matches one segment, a trailing slash is
+tolerated, and the rest is literal. **`--months`** (default 12) counts back from the current
+month, so the last month is a month to date. Without **`--out`** it prints to stdout; with it the
+file is written whole, through a sibling and a rename, so a reader never sees half of it.
+
+```json
+{
+  "generated_at": "2026-09-11T18:34:13Z",
+  "months": ["2025-10", "…", "2026-09"],
+  "events": {"astronaut_opened": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 77, 62]},
+  "pageviews": {"/careers/:id": [0, 0, 0, 0, 0, 0, 0, 610, 66, 59, 68, 19]}
+}
+```
+
+Every array lines up with `months`. The website's `npm run journeys:counts` wraps this with the
+patterns taken from its own journey map.
 
 ## Dashboards as files
 

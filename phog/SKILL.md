@@ -75,6 +75,24 @@ tools:
         dry_run:
           type: boolean
 
+  - name: posthog_journeys
+    description: >
+      Write a JSON snapshot of how many times every event fired per month, for the last N
+      months, plus `$pageview` counts for any route patterns given (`:param` matches one
+      segment). The website's /admin/journeys page reads this file; `npm run journeys:counts`
+      in the website repo is the usual way to call it.
+    argv: [journeys, --months, "{{months}}", "{{out?:--out}}", "{{out?}}"]
+    timeout_ms: 120000
+    input:
+      type: object
+      properties:
+        months:
+          type: integer
+          default: 12
+        out:
+          type: string
+          description: file to write; prints to stdout when omitted
+
   - name: posthog_dashboard_export
     description: >
       Write a dashboard PostHog already has to a YAML file that posthog_dashboard_apply can read
