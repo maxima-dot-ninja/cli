@@ -30,7 +30,9 @@ tools:
           description: the action's arguments, as an object
         account:
           type: string
-          description: which connected account, when he has more than one (defaults to the active one)
+          description: >
+            which connected account, by the name google_accounts lists, when he has more than one
+            (defaults to the active one)
 
   - name: google_actions
     description: >
@@ -51,6 +53,17 @@ tools:
     input:
       type: object
       properties: {}
+
+  - name: google_accounts
+    description: >
+      List every connected Google account: its name, the address it acts as, and its tier — `user`
+      is a person's mailbox and never sends mail, `ai` is the assistant's own and may. Reads the
+      local config only, so it is instant. Call it before passing `account` to `google`.
+    argv: [accounts]
+    timeout_ms: 30000
+    input:
+      type: object
+      properties: {}
 ---
 
 # vgoog
@@ -60,19 +73,23 @@ call returns JSON.
 
 ## Two ways in, same actions
 
-**Inside vaulty** — three tools, and the order matters:
+**Inside vaulty** — four tools, and the order matters:
 
 1. **`google_actions`** — the map. Ten services, each with its own action list. Read it before
    reaching for anything you have not used in this conversation.
 2. **`google`** — the work. `service` + `action` + `args`.
 3. **`google_status`** — the alibi. Run it before reporting a failure, so you can say whether the
    problem is the request or the connection.
+4. **`google_accounts`** — who is connected. It gives you the names `account` accepts, and which
+   of them may send mail.
 
 **Anywhere with a shell** — Claude Code, a script, CI — it is a CLI, and the same actions:
 
 ```bash
 vgoog list                                   # every service and action
 vgoog doctor                                 # is it connected, and as whom
+vgoog accounts                               # every account, its tier, and the address it acts as
+vgoog switch <account>                       # make that account the default for later calls
 vgoog exec <service> <action> '<json args>'  # the work
 ```
 
@@ -199,7 +216,9 @@ That is the whole list. Report what you did when you are finished, not what you 
 ## Gotchas
 
 - **Multiple accounts.** More than one is connected. Anything ambiguous — "my calendar", "check my
-  email" — is the active account. Pass `account` only when he names one.
+  email" — is the active account. Pass `account` only when he names one. `vgoog accounts` lists
+  the names. Use `--account` for a single call rather than `vgoog switch`, because switching moves
+  his default for everything that comes after.
 - **Auth errors are not your fault and not his.** `unauthorized_client` means the service account's
   scopes are not authorised in the admin console; `invalid_grant` means delegation is off or the
   user is wrong. `vgoog doctor` tells you which. Say that plainly rather than guessing at the

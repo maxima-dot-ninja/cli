@@ -11,6 +11,7 @@ pub mod sheets;
 pub mod slides;
 pub mod tasks;
 
+use crate::tier::Tier;
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
@@ -32,14 +33,25 @@ pub enum CliCommand {
         action: String,
         /// JSON arguments (optional)
         args: Option<String>,
-        /// Account name to use (overrides active_account)
+        /// Account to run this one call as. The active account stays as it is
         #[arg(long)]
         account: Option<String>,
     },
     /// List all available services and actions
     List,
-    /// Check auth status
-    Status,
+    /// Check auth status, and print the account and its tier
+    Status {
+        /// Account to check. The active account stays as it is
+        #[arg(long)]
+        account: Option<String>,
+    },
+    /// List every configured account, with its tier and the address it acts as
+    Accounts,
+    /// Make an account the active one — the default for every later call
+    Switch {
+        /// Account name, as `vgoog accounts` lists it
+        account: String,
+    },
     /// Sign in without the wizard — for scripts, agents and fresh machines
     Login {
         /// Account name to create or replace
@@ -51,12 +63,15 @@ pub enum CliCommand {
         /// OAuth client secret. Omit to read VGOOG_CLIENT_SECRET from the environment
         #[arg(long)]
         client_secret: Option<String>,
-        /// Path to a service account JSON key — switches this account to domain-wide delegation
+        /// Path to a service account JSON key. Omit it to reuse the key already saved on this machine
         #[arg(long)]
         service_account: Option<String>,
-        /// Workspace user to impersonate. Required with --service-account
+        /// Workspace user to impersonate — switches this account to domain-wide delegation
         #[arg(long)]
         subject: Option<String>,
+        /// Whose mailbox this is: `user` never sends mail through vgoog, `ai` may
+        #[arg(long, value_enum, default_value_t = Tier::User)]
+        tier: Tier,
     },
     /// What is configured, what it can reach, and what is wrong with it
     Doctor,

@@ -1,6 +1,7 @@
 use crate::auth::ensure_token;
 use crate::config::{Config, SingleAccountConfig};
 use crate::error::{Result, VgoogError};
+use crate::tier::{self, Tier};
 use reqwest::{Client, Method, Response};
 use serde_json::Value;
 use std::sync::Arc;
@@ -8,14 +9,18 @@ use tokio::sync::Mutex;
 
 pub struct GoogleClient {
     http: Client,
+    /// The account this client acts as — not necessarily the active one. `--account` builds a
+    /// client for any account and leaves `active_account` alone.
     account_config: Arc<Mutex<SingleAccountConfig>>,
     /// The full multi-account config for account switching
     full_config: Arc<Mutex<Config>>,
 }
 
 impl GoogleClient {
-    pub fn new(config: Config) -> Result<Self> {
-        let account_config = config.for_active_account()?;
+    /// A client for the named account, or for the active one when `account` is None.
+    pub fn new(config: Config, account: Option<&str>) -> Result<Self> {
+        let name = account.map(str::to_string).unwrap_or_else(|| config.active_account.clone());
+        let account_config = config.for_account(&name)?;
         let http = Client::builder()
             .user_agent("vgoog/0.1.0")
             .build()
@@ -27,30 +32,46 @@ impl GoogleClient {
         })
     }
 
-    /// Switch to a different account by name
+    /// A client for another account that shares this one's connections. The active account does
+    /// not change.
+    pub async fn for_account(&self, name: &str) -> Result<Self> {
+        let account_config = self.full_config.lock().await.for_account(name)?;
+        Ok(Self {
+            http: self.http.clone(),
+            account_config: Arc::new(Mutex::new(account_config)),
+            full_config: self.full_config.clone(),
+        })
+    }
+
+    /// Make another account the active one — the TUI's Ctrl+A. Only `active_account` is written,
+    /// so a token another vgoog process saved in the meantime survives.
     pub async fn switch_account(&self, name: &str) -> Result<()> {
         let mut full = self.full_config.lock().await;
-        if !full.switch_account(name) {
-            return Err(VgoogError::Config(format!("Account '{name}' not found")));
-        }
-        full.save()?;
-        let new_account_config = full.for_active_account()?;
-        let mut current = self.account_config.lock().await;
-        *current = new_account_config;
+        let account_config = full.for_account(name)?;
+        Config::update(&full, |config| config.active_account = name.to_string())?;
+        full.active_account = name.to_string();
+        *self.account_config.lock().await = account_config;
         Ok(())
     }
 
-    /// Get the active account name
+    /// The name of the account this client acts as
     pub async fn active_account_name(&self) -> String {
-        self.full_config.lock().await.active_account.clone()
+        self.account_config.lock().await.name.clone()
     }
 
-    /// Get the active account label
+    /// The label of the account this client acts as
     pub async fn active_account_label(&self) -> String {
+        let name = self.active_account_name().await;
         let full = self.full_config.lock().await;
-        full.active()
+        full.accounts
+            .get(&name)
             .map(|a| a.label.clone())
-            .unwrap_or_else(|_| "Unknown".to_string())
+            .unwrap_or_else(|| "Unknown".to_string())
+    }
+
+    /// The tier of the account this client acts as
+    pub async fn tier(&self) -> Tier {
+        self.account_config.lock().await.tier
     }
 
     /// Get all account names
@@ -80,8 +101,12 @@ impl GoogleClient {
         Ok(())
     }
 
-    async fn ensure_token(&self) -> Result<String> {
+    /// The one door every request goes through: refuse what this account's tier does not allow,
+    /// then hand back a token for the rest. The refusal comes first, so a denied call never even
+    /// mints a token.
+    async fn authorize(&self, url: &str) -> Result<String> {
         let mut config = self.account_config.lock().await;
+        tier::check(&config.name, config.tier, &config.scopes, url)?;
         ensure_token(&mut config).await?;
         Ok(config.auth.access_token.clone())
     }
@@ -126,7 +151,7 @@ impl GoogleClient {
         url: &str,
         body: Option<&Value>,
     ) -> Result<Value> {
-        let token = self.ensure_token().await?;
+        let token = self.authorize(url).await?;
         let mut req = self.http.request(method, url).bearer_auth(&token);
         if let Some(b) = body {
             req = req.json(b);
@@ -162,7 +187,7 @@ impl GoogleClient {
         file_bytes: Vec<u8>,
         mime_type: &str,
     ) -> Result<Value> {
-        let token = self.ensure_token().await?;
+        let token = self.authorize(url).await?;
         let metadata_part = reqwest::multipart::Part::text(serde_json::to_string(metadata)?)
             .mime_str("application/json")?;
         let file_part = reqwest::multipart::Part::bytes(file_bytes).mime_str(mime_type)?;
@@ -181,7 +206,7 @@ impl GoogleClient {
     }
 
     pub async fn download(&self, url: &str) -> Result<Vec<u8>> {
-        let token = self.ensure_token().await?;
+        let token = self.authorize(url).await?;
         let resp = self.http.get(url).bearer_auth(&token).send().await?;
         let status = resp.status();
         if status.is_success() {
@@ -197,7 +222,7 @@ impl GoogleClient {
     }
 
     pub async fn post_empty(&self, url: &str) -> Result<Value> {
-        let token = self.ensure_token().await?;
+        let token = self.authorize(url).await?;
         let resp = self.http.post(url).bearer_auth(&token).send().await?;
         self.handle_response(resp).await
     }

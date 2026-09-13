@@ -15,7 +15,14 @@ pub async fn refresh_service_account(config: &mut SingleAccountConfig, delegated
     }
 
     let key = ServiceAccountKey::parse(&delegated.key_json)?;
-    let scopes: Vec<&str> = delegated.scopes.iter().map(String::as_str).collect();
+    // The tier trims what the key is authorised for: a `user` token never carries the scopes that
+    // send or reroute mail, even though the admin console granted them to the key.
+    let scopes: Vec<&str> = delegated
+        .scopes
+        .iter()
+        .map(String::as_str)
+        .filter(|scope| super::scopes::allowed(config.tier, scope))
+        .collect();
     let (access_token, expiry) = fetch_token(&key, &delegated.subject, &scopes).await?;
 
     config.auth.access_token = access_token;

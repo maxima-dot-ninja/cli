@@ -6,10 +6,12 @@ mod cli;
 mod client;
 mod config;
 mod error;
+mod tier;
 mod ui;
 
 use crate::client::GoogleClient;
 use crate::config::{Account, AuthConfig, Config, DelegatedAccount, Strategy};
+use crate::tier::Tier;
 use crate::ui::app::{App, Screen};
 use crate::ui::views::handlers;
 use crate::ui::views::render;
@@ -91,15 +93,26 @@ async fn add_account_flow() -> anyhow::Result<(String, Account)> {
     let name = prompt("  Account name (e.g. work, personal): ")?;
     let label = prompt("  Display label (e.g. Work Gmail): ")?;
 
+    println!("\n  Whose mailbox is this?\n");
+    println!("    1  A person's                 — vgoog works in it but never sends mail from it");
+    println!("    2  The assistant's own        — vgoog may send mail from it\n");
+    let tier = if prompt("  Choose [1]: ")? == "2" { Tier::Ai } else { Tier::User };
+
     println!("\n  How should this account authenticate?\n");
     println!("    1  Sign in with Google        — opens a browser, catches the callback (recommended)");
     println!("    2  Service account            — Workspace only, impersonates a user, no browser ever");
     println!("    3  Paste tokens by hand       — when you already have them\n");
 
-    let (auth, service_account) = match prompt("  Choose [1]: ")?.as_str() {
-        "2" => service_account_flow()?,
-        "3" => (manual_token_flow()?, None),
-        _ => (browser_login_flow().await?, None),
+    let (auth, scopes, service_account) = match prompt("  Choose [1]: ")?.as_str() {
+        "2" => {
+            let (auth, delegated) = service_account_flow()?;
+            (auth, Vec::new(), delegated)
+        }
+        "3" => (manual_token_flow()?, Vec::new(), None),
+        _ => {
+            let (auth, scopes) = browser_login_flow(tier).await?;
+            (auth, scopes, None)
+        }
     };
 
     let account_name = if name.is_empty() {
@@ -118,6 +131,8 @@ async fn add_account_flow() -> anyhow::Result<(String, Account)> {
         account_name,
         Account {
             label: account_label,
+            tier,
+            scopes,
             auth,
             service_account,
         },
@@ -126,7 +141,8 @@ async fn add_account_flow() -> anyhow::Result<(String, Account)> {
 
 // ── Sign in with Google ──
 
-async fn browser_login_flow() -> anyhow::Result<AuthConfig> {
+/// Returns the credentials and the scopes the login asked for.
+async fn browser_login_flow(tier: Tier) -> anyhow::Result<(AuthConfig, Vec<String>)> {
     println!("\n  ── Sign in with Google ──\n");
     println!("  You need a Desktop OAuth client from:");
     println!("  https://console.cloud.google.com/apis/credentials\n");
@@ -139,7 +155,7 @@ async fn browser_login_flow() -> anyhow::Result<AuthConfig> {
         anyhow::bail!("a client id and secret are required");
     }
 
-    let scopes = auth::scopes::oauth_default();
+    let scopes = auth::scopes::oauth_for(tier);
     println!("\n  Requesting {} scopes across {} services.", scopes.len(), auth::scopes::service_names().len() - 1);
 
     let granted = auth::callback::login(&client_id, &client_secret, &scopes, |url| {
@@ -151,13 +167,14 @@ async fn browser_login_flow() -> anyhow::Result<AuthConfig> {
 
     println!("  Signed in.\n");
 
-    Ok(AuthConfig {
+    let auth = AuthConfig {
         client_id,
         client_secret,
         access_token: granted.access_token,
         refresh_token: granted.refresh_token,
         token_expiry: granted.expiry,
-    })
+    };
+    Ok((auth, auth::scopes::owned(&scopes)))
 }
 
 // ── Service account (domain-wide delegation) ──
@@ -292,7 +309,7 @@ async fn manage_accounts_menu(config: &mut Config) -> anyhow::Result<bool> {
 // ── TUI ──
 
 async fn run_tui(config: Config) -> anyhow::Result<()> {
-    let client = GoogleClient::new(config)?;
+    let client = GoogleClient::new(config, None)?;
 
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -514,64 +531,69 @@ async fn run_tui(config: Config) -> anyhow::Result<()> {
 async fn run_cli(command: cli::CliCommand) -> anyhow::Result<()> {
     match command {
         cli::CliCommand::Exec { service, action, args, account } => {
-            let mut config = Config::load()?;
-
-            if let Some(ref acct_name) = account {
-                if !config.switch_account(acct_name) {
-                    eprintln!("{}", serde_json::to_string(&serde_json::json!({
-                        "ok": false,
-                        "error": format!("Account '{}' not found", acct_name)
-                    }))?);
-                    std::process::exit(1);
-                }
-            }
-
-            let client = GoogleClient::new(config)?;
+            let config = Config::load()?;
+            // A client for the named account rather than a switch to it: `--account` is this one
+            // call's business, and the active account stays as it was.
+            let client = GoogleClient::new(config, account.as_deref()).unwrap_or_else(|e| fail(e));
 
             let parsed_args: serde_json::Value = args
                 .map(|s| serde_json::from_str(&s))
                 .transpose()?
                 .unwrap_or(serde_json::json!({}));
 
-            match cli::exec::execute(&client, &service, &action, parsed_args).await {
-                Ok(val) => {
-                    println!("{}", serde_json::to_string(&serde_json::json!({
-                        "ok": true,
-                        "data": val
-                    }))?);
-                }
-                Err(e) => {
-                    eprintln!("{}", serde_json::to_string(&serde_json::json!({
-                        "ok": false,
-                        "error": e.to_string()
-                    }))?);
-                    std::process::exit(1);
-                }
-            }
+            let val = cli::exec::execute(&client, &service, &action, parsed_args)
+                .await
+                .unwrap_or_else(|e| fail(e));
+            println!("{}", serde_json::to_string(&serde_json::json!({
+                "ok": true,
+                "data": val
+            }))?);
         }
         cli::CliCommand::List => {
             println!("{}", serde_json::to_string_pretty(&cli::exec::list_all())?);
         }
-        cli::CliCommand::Status => {
+        cli::CliCommand::Status { account } => {
             let config = Config::load()?;
-            let client = GoogleClient::new(config)?;
-            let api = api::gmail::GmailApi::new(&client);
+            let client = GoogleClient::new(config, account.as_deref()).unwrap_or_else(|e| fail(e));
+            let profile = api::gmail::GmailApi::new(&client)
+                .get_profile()
+                .await
+                .unwrap_or_else(|e| fail(e));
 
-            match api.get_profile().await {
-                Ok(val) => {
-                    println!("{}", serde_json::to_string(&serde_json::json!({
-                        "ok": true,
-                        "data": val
-                    }))?);
-                }
-                Err(e) => {
-                    eprintln!("{}", serde_json::to_string(&serde_json::json!({
-                        "ok": false,
-                        "error": e.to_string()
-                    }))?);
-                    std::process::exit(1);
-                }
-            }
+            // The tier rides along, so whoever reads this knows up front whether the account sends.
+            println!("{}", serde_json::to_string(&serde_json::json!({
+                "ok": true,
+                "account": client.active_account_name().await,
+                "tier": client.tier().await.label(),
+                "data": profile
+            }))?);
+        }
+
+        cli::CliCommand::Accounts => {
+            let config = Config::load()?;
+            let accounts: Vec<serde_json::Value> = config
+                .accounts
+                .iter()
+                .map(|(name, account)| account_json(name, account, &config.active_account))
+                .collect();
+            println!("{}", serde_json::to_string(&serde_json::json!({
+                "ok": true,
+                "active": config.active_account,
+                "accounts": accounts
+            }))?);
+        }
+
+        cli::CliCommand::Switch { account } => {
+            let config = Config::load()?;
+            let Some(tier) = config.accounts.get(&account).map(|found| found.tier) else {
+                let known: Vec<&str> = config.accounts.keys().map(String::as_str).collect();
+                fail(format!("account '{account}' is not configured. Configured accounts: {}", known.join(", ")));
+            };
+            Config::update(&config, |config| config.active_account = account.clone())?;
+            println!(
+                "{}",
+                serde_json::to_string(&serde_json::json!({ "ok": true, "account": account, "tier": tier.label() }))?
+            );
         }
 
         cli::CliCommand::Scopes { all } => {
@@ -585,33 +607,44 @@ async fn run_cli(command: cli::CliCommand) -> anyhow::Result<()> {
             client_secret,
             service_account,
             subject,
+            tier,
         } => {
-            let entry = match service_account {
-                Some(path) => {
-                    let subject = subject.ok_or_else(|| {
-                        anyhow::anyhow!("--subject is required with --service-account: delegation acts AS someone")
-                    })?;
-                    let key_json = std::fs::read_to_string(shellexpand(&path))?;
+            let existing = Config::load().ok();
+
+            let entry = match (service_account, subject) {
+                (Some(_), None) => {
+                    anyhow::bail!("--subject is required with --service-account: delegation acts AS someone")
+                }
+                (key_path, Some(subject)) => {
+                    // No key file means the key already on this machine. Every delegated account
+                    // here shares one, so adding another mailbox needs nothing but its address.
+                    let key_json = match key_path {
+                        Some(path) => std::fs::read_to_string(shellexpand(&path))?,
+                        None => existing
+                            .as_ref()
+                            .and_then(|config| config.accounts.values().find_map(|a| a.service_account.as_ref()))
+                            .map(|delegated| delegated.key_json.clone())
+                            .ok_or_else(|| {
+                                anyhow::anyhow!("--service-account <key.json> is needed: no delegated key is saved on this machine yet")
+                            })?,
+                    };
                     let key = auth::service_account::ServiceAccountKey::parse(&key_json)?;
                     eprintln!("  key belongs to {}", key.client_email);
 
                     Account {
                         label: format!("{subject} (delegated)"),
-                        auth: AuthConfig {
-                            client_id: String::new(),
-                            client_secret: String::new(),
-                            access_token: String::new(),
-                            refresh_token: String::new(),
-                            token_expiry: chrono::Utc::now(),
-                        },
+                        tier,
+                        scopes: Vec::new(),
+                        auth: AuthConfig::empty(),
                         service_account: Some(DelegatedAccount {
                             subject,
                             key_json,
-                            scopes: auth::scopes::all().iter().map(|s| s.to_string()).collect(),
+                            // Everything the admin console authorised; the tier trims it per token.
+                            scopes: auth::scopes::owned(&auth::scopes::all()),
                         }),
                     }
                 }
-                None => {
+                (None, None) => {
                     // Falling back to the environment is what makes this usable straight after
                     // `vaulty secrets pull` — the credentials are already exported there.
                     let client_id = client_id
@@ -621,7 +654,7 @@ async fn run_cli(command: cli::CliCommand) -> anyhow::Result<()> {
                         .or_else(|| std::env::var("VGOOG_CLIENT_SECRET").ok())
                         .ok_or_else(|| anyhow::anyhow!("--client-secret, or VGOOG_CLIENT_SECRET in the environment"))?;
 
-                    let scopes = auth::scopes::oauth_default();
+                    let scopes = auth::scopes::oauth_for(tier);
                     let granted = auth::callback::login(&client_id, &client_secret, &scopes, |url| {
                         eprintln!("  open this if your browser did not:\n  {url}");
                     })
@@ -629,6 +662,8 @@ async fn run_cli(command: cli::CliCommand) -> anyhow::Result<()> {
 
                     Account {
                         label: account.clone(),
+                        tier,
+                        scopes: auth::scopes::owned(&scopes),
                         auth: AuthConfig {
                             client_id,
                             client_secret,
@@ -641,17 +676,25 @@ async fn run_cli(command: cli::CliCommand) -> anyhow::Result<()> {
                 }
             };
 
-            let mut config = Config::load().unwrap_or_else(|_| Config {
+            let fallback = existing.unwrap_or_else(|| Config {
                 active_account: account.clone(),
                 accounts: Default::default(),
                 auth: None,
                 strategy: Strategy::default(),
             });
-            config.add_account(account.clone(), entry);
-            config.active_account = account.clone();
-            config.save()?;
+            Config::update(&fallback, |config| {
+                config.add_account(account.clone(), entry);
+                // A new account becomes active only when there is no active one to keep. Adding the
+                // assistant's mailbox must not quietly move "my email" over to it.
+                if !config.accounts.contains_key(&config.active_account) {
+                    config.active_account = account.clone();
+                }
+            })?;
 
-            println!("{}", serde_json::to_string(&serde_json::json!({ "ok": true, "account": account }))?);
+            println!(
+                "{}",
+                serde_json::to_string(&serde_json::json!({ "ok": true, "account": account, "tier": tier.label() }))?
+            );
         }
 
         cli::CliCommand::Strategy { kind } => {
@@ -682,17 +725,7 @@ async fn run_cli(command: cli::CliCommand) -> anyhow::Result<()> {
                     let accounts: Vec<serde_json::Value> = config
                         .accounts
                         .iter()
-                        .map(|(name, account)| {
-                            serde_json::json!({
-                                "name": name,
-                                "label": account.label,
-                                "email": account.service_account.as_ref().map(|d| d.subject.clone()),
-                                "kind": if account.service_account.is_some() { "service_account" } else { "oauth" },
-                                "subject": account.service_account.as_ref().map(|d| d.subject.clone()),
-                                "usable": config::account_is_usable(account),
-                                "active": *name == config.active_account,
-                            })
-                        })
+                        .map(|(name, account)| account_json(name, account, &config.active_account))
                         .collect();
                     report.insert("accounts".into(), accounts.into());
                     report.insert("strategy".into(), config.strategy.label().into());
@@ -715,7 +748,7 @@ async fn run_cli(command: cli::CliCommand) -> anyhow::Result<()> {
                     }
 
                     // The only check that means anything: can it actually reach Google right now?
-                    let reachable = match GoogleClient::new(config.clone()) {
+                    let reachable = match GoogleClient::new(config.clone(), None) {
                         Err(error) => serde_json::json!({ "ok": false, "error": error.to_string() }),
                         Ok(client) => match api::gmail::GmailApi::new(&client).get_profile().await {
                             Ok(profile) => serde_json::json!({ "ok": true, "as": profile.get("emailAddress") }),
@@ -740,6 +773,27 @@ fn print_banner(subtitle: &str) {
     println!("  ║     vgoog — Google Workspace TUI      ║");
     println!("  ║     {:<33} ║", subtitle);
     println!("  ╚═══════════════════════════════════════╝\n");
+}
+
+/// One account as `accounts` and `doctor` report it. Read from the config alone: no network, no secrets.
+fn account_json(name: &str, account: &Account, active: &str) -> serde_json::Value {
+    let subject = account.service_account.as_ref().map(|delegated| delegated.subject.clone());
+    serde_json::json!({
+        "name": name,
+        "label": account.label,
+        "email": subject,
+        "kind": if account.service_account.is_some() { "service_account" } else { "oauth" },
+        "tier": account.tier.label(),
+        "subject": subject,
+        "usable": config::account_is_usable(account),
+        "active": name == active,
+    })
+}
+
+/// Report a command-line failure the way every command reports one, and exit 1.
+fn fail(error: impl std::fmt::Display) -> ! {
+    eprintln!("{}", serde_json::json!({ "ok": false, "error": error.to_string() }));
+    std::process::exit(1)
 }
 
 fn prompt(msg: &str) -> anyhow::Result<String> {

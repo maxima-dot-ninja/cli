@@ -7,6 +7,8 @@
 // Every string here was checked against Google's consent endpoint — a typo'd scope is rejected as
 // invalid_scope at authorise time, which is a much better place to find out than in production.
 
+use crate::tier::Tier;
+
 /// A group of scopes, so a login can ask for Gmail without also asking for Drive.
 pub struct ScopeGroup {
     pub service: &'static str,
@@ -84,4 +86,41 @@ pub fn oauth_default() -> Vec<&'static str> {
 /// Everything, including the Workspace-admin scopes a delegated service account can reach.
 pub fn all() -> Vec<&'static str> {
     GROUPS.iter().flat_map(|group| group.scopes.iter().copied()).collect()
+}
+
+/// What a `user` account is never granted. Neither is needed to read, label, trash or draft:
+/// compose exists to send, and settings.sharing controls forwarding, send-as and delegates — the
+/// settings that route a person's mail to someone else.
+const SEND_ONLY: &[&str] = &[
+    "https://www.googleapis.com/auth/gmail.compose",
+    "https://www.googleapis.com/auth/gmail.settings.sharing",
+];
+
+/// May an account at this tier hold this scope? Applied whenever a token is requested, so a
+/// delegated key the admin console authorised for everything still mints a `user` token without
+/// the send-only scopes — and changing an account's tier needs no change to its scope list.
+pub fn allowed(tier: Tier, scope: &str) -> bool {
+    tier == Tier::Ai || !SEND_ONLY.contains(&scope)
+}
+
+/// The scopes an OAuth login asks for at a tier.
+pub fn oauth_for(tier: Tier) -> Vec<&'static str> {
+    oauth_default().into_iter().filter(|scope| allowed(tier, scope)).collect()
+}
+
+pub fn owned(scopes: &[&str]) -> Vec<String> {
+    scopes.iter().map(|scope| scope.to_string()).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_user_login_keeps_modify_and_loses_the_send_only_scopes() {
+        let user = oauth_for(Tier::User);
+        assert!(user.contains(&"https://www.googleapis.com/auth/gmail.modify"));
+        assert!(!user.iter().any(|scope| SEND_ONLY.contains(scope)));
+        assert_eq!(oauth_for(Tier::Ai), oauth_default());
+    }
 }

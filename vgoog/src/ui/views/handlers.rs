@@ -459,28 +459,31 @@ async fn submit_gmail(app: &mut App, fields: &[InputField]) -> crate::error::Res
             Ok("Email sent successfully!".to_string())
         }
         11 => {
-            // Unified Search — search across all accounts
+            // Unified Search — search across all accounts. Every other account gets a client of
+            // its own, so searching never changes which account is active.
             let query = fields[0].value.clone();
-            let original_account = app.client.active_account_name().await;
+            let current = app.client.active_account_name().await;
             let all_accounts = app.client.account_names().await;
             let mut all_items: Vec<ListItem> = Vec::new();
             let mut errors: Vec<String> = Vec::new();
 
             for account_name in &all_accounts {
-                let label = if *account_name == original_account {
-                    // Already on this account, no need to switch
-                    app.client.active_account_label().await
+                let other;
+                let client = if *account_name == current {
+                    &app.client
                 } else {
-                    match app.client.switch_account(account_name).await {
-                        Ok(()) => app.client.active_account_label().await,
+                    other = match app.client.for_account(account_name).await {
+                        Ok(client) => client,
                         Err(e) => {
                             errors.push(format!("{account_name}: {e}"));
                             continue;
                         }
-                    }
+                    };
+                    &other
                 };
+                let label = client.active_account_label().await;
 
-                let acct_api = GmailApi::new(&app.client);
+                let acct_api = GmailApi::new(client);
                 match acct_api.list_messages(Some(&query), None, 10, None).await {
                     Ok(val) => {
                         let messages = val.get("messages").and_then(|v| v.as_array()).cloned().unwrap_or_default();
@@ -509,11 +512,6 @@ async fn submit_gmail(app: &mut App, fields: &[InputField]) -> crate::error::Res
                         errors.push(format!("{label}: {e}"));
                     }
                 }
-            }
-
-            // Switch back to original account
-            if app.client.active_account_name().await != original_account {
-                let _ = app.client.switch_account(&original_account).await;
             }
 
             app.set_items(all_items);
