@@ -2,19 +2,19 @@
 
 CLI for the [Pocket AI API](https://docs.heypocketai.com/docs/api) — list and export recordings (transcript + summary), and search them in natural language.
 
-Runs on [bun](https://bun.sh), no dependencies, no build step. Search also needs
-**Node's `npx`** on your PATH, because that is how pocket runs qmd.
+Written in Rust. Search also needs **Node's `npx`** on your PATH, because that is how
+pocket runs qmd.
 
 ## Install
 
-Run this from the `pocket/` folder:
+Run this from the `pocket/` folder. It needs Rust 1.88+:
 
 ```sh
-chmod +x pocket.ts
-ln -s "$(pwd)/pocket.ts" /opt/homebrew/bin/pocket
+cargo install --path .
 ```
 
-The script starts with `#!/usr/bin/env bun`, so `bun` has to be on your PATH as well.
+That puts the binary in `~/.cargo/bin/`. pocket is compiled, so rerun it after you change
+the code.
 
 pocket also ships a `SKILL.md`, so an agent can use it as a skill. Link it into Claude
 Code with `ln -s "$(pwd)" ~/.claude/skills/pocket`, or mount it in vaulty with
@@ -90,7 +90,8 @@ pocket index               # re-scan the exports and update the search index
 
 The menu offers search, list, export one, export all, and rebuild index. You move with
 **↑/↓ and Enter**, or press a **digit** to jump to an entry. Any command pocket does not
-recognise also opens the menu.
+recognise also opens the menu. The menu needs a terminal, so scripts and agents use the
+commands above instead.
 
 **`list` and `export all` only see the first 100 recordings.** pocket asks the API for
 a single page of 100 and does not paginate, so anything past that is never listed or
@@ -121,6 +122,12 @@ summary with its action items as a checklist.
 **Re-exporting overwrites the files in place.** Two recordings with the same title on
 the same day map to the same folder, so the second overwrites the first and search
 only ever sees one of them.
+
+`export all` fetches **four recordings at a time** and prints each one as a single block
+when it lands, so the order changes from run to run. A recording that fails is named on
+the last line, and rerunning `export all` retries it. Each file is written under a
+temporary name and renamed into place, so an interrupted export never leaves half a
+file for search to index.
 
 The path is fixed rather than relative to the current directory so the search index
 — and anything else reading these files — can find them from anywhere.

@@ -7,7 +7,7 @@ Personal command-line tools. One repo, seven independent tools, no shared build.
 | [**merc**](merc/README.md) | The whole Mercury banking API | Rust | ✅ |
 | [**agree**](agree/README.md) | Invoices, agreements and contacts on the Agree API | Rust | ✅ |
 | [**vgoog**](vgoog/README.md) | All of Google Workspace — Gmail, Calendar, Drive, Sheets, Docs | Rust | ✅ |
-| [**pocket**](pocket/README.md) | Export and search recorded conversations | Bun / TypeScript | ✅ |
+| [**pocket**](pocket/README.md) | Export and search recorded conversations | Rust | ✅ |
 | [**phog**](phog/README.md) | PostHog — HogQL, people by fingerprint, dashboards as files | Rust | ✅ |
 | [**lgit**](lgit/README.md) | AI-written commit messages, and a plain-English `status` | Rust | — |
 | **ccx** | Claude Code launcher with auto-named sessions | Bash | — |
@@ -113,8 +113,8 @@ pocket search "pricing" --fast --json   # skip reranking, print JSON for scripts
 
 Search runs **entirely on-device** via [qmd](https://github.com/tobi/qmd), which does
 hybrid keyword and vector search with local reranking. Nothing is uploaded. qmd runs
-through `npx`, so search needs Node as well as Bun, and the first search downloads
-about 2GB of models.
+through `npx`, so search needs Node, and the first search downloads about 2GB of
+models.
 
 **`list` and `export all` only see the first 100 recordings**, because pocket reads a
 single page from the API.
@@ -205,10 +205,6 @@ folder's `memory/`. Rerunning `cleanup` on a folder that is already tidy writes 
 ## Install
 
 ```sh
-# pocket — needs bun, plus node for search
-chmod +x pocket/pocket.ts
-ln -s "$PWD/pocket/pocket.ts" /opt/homebrew/bin/pocket
-
 # ccx — needs bash and claude
 chmod +x ccx/ccx
 ln -s "$PWD/ccx/ccx" /opt/homebrew/bin/ccx
@@ -227,9 +223,12 @@ cargo install --path vgoog
 
 # phog — needs rust 1.88+
 cargo install --path phog
+
+# pocket — needs rust 1.88+, plus node for search
+cargo install --path pocket
 ```
 
-pocket and ccx are symlinked rather than copied, so edits to them are live immediately.
+ccx is symlinked rather than copied, so edits to it are live immediately.
 The Rust tools are compiled, so rerun `cargo install` after you change one.
 
 ## API keys
