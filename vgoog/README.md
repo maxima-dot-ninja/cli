@@ -38,7 +38,7 @@ We believe:
 - **Speed is a feature.** vgoog is written in Rust with async I/O, compiles to a 4.4MB static binary, starts instantly, and renders at 60fps. The only bottleneck is Google's API latency — and we handle pagination and token refresh transparently so you never wait for anything we control.
 - **Text is the universal interface.** Every API response is browsable as structured JSON. Every action is a form you can fill out with your keyboard. No mouse required. No GUIs. Just text, terminals, and keystrokes.
 - **Completeness matters.** vgoog doesn't just list your emails and call it a day. It exposes 237 API methods across 10 services — messages, threads, labels, drafts, filters, settings, delegates, forwarding, send-as aliases, calendar events with attendees, drive file uploads with multipart encoding, spreadsheet cell manipulation, document formatting, presentation slide management, form question builders, task hierarchies, contact groups, Apps Script deployments and remote execution. If Google's API supports it, vgoog lets you do it.
-- **Trust the operator.** vgoog gives you the raw power of Google's APIs without hiding behind "are you sure?" dialogs for every action. Destructive operations in the TUI get a single confirm prompt, and `vgoog exec` asks nothing at all. Everything else executes immediately. You're an adult. You know what you're doing.
+- **Trust the operator.** vgoog gives you the raw power of Google's APIs without hiding behind "are you sure?" dialogs for every action. Destructive operations in the TUI get a single confirm prompt, and `vgoog exec` asks nothing at all. Everything else executes immediately. You're an adult. You know what you're doing. The one exception is mail: vgoog never sends from a person's own account, only from one marked as the assistant's (see [Trust tiers](#trust-tiers)).
 
 ---
 
@@ -110,6 +110,7 @@ strategy = "auto"
 
 [accounts.work]
 label = "Work Gmail"
+tier = "user"   # or "ai" — see Trust tiers
 
 [accounts.work.auth]
 client_id = "your-client-id.apps.googleusercontent.com"
@@ -120,6 +121,7 @@ token_expiry = 2026-02-20T12:00:00Z
 
 [accounts.you]
 label = "you@yourdomain.com (delegated)"
+tier = "user"
 
 [accounts.you.auth]
 client_id = ""
@@ -139,6 +141,37 @@ An account with a `service_account` block signs in as that service account, acti
 Switch between accounts instantly with `Ctrl+A` inside the TUI. The active account is displayed in the header bar. Switching resets your view back to service selection so you start fresh with the new account's data, and it saves that account as the active one, so later `vgoog exec` calls use it too.
 
 vgoog automatically refreshes your access token when it expires (with a 2-minute safety buffer), saves the new token to disk, and never interrupts your workflow. A service account works the same way, except that each new token is minted from its key instead of a refresh token.
+
+### Trust tiers
+
+Every account has a tier. It says whose mailbox the account is, and so whether vgoog may send mail
+from it.
+
+| Tier | Whose mailbox | What vgoog does in it |
+|---|---|---|
+| `user` (the default) | a person's own | everything **except sending mail**: it reads, labels, archives, trashes and drafts |
+| `ai` | the assistant's own | everything, sending included |
+
+Google's scopes cannot draw this line, because `gmail.modify` — the scope that labels and archives —
+also sends. So vgoog enforces it itself, at the one place every request passes through, before
+anything leaves the machine. A send from a `user` account (`messages.send` or `drafts.send`) is
+refused with `Denied:` and a pointer to save a draft instead, so the account's owner can send it.
+The refusal deliberately does not say how to lift it: whoever reads it is usually the assistant, and
+changing a tier is the owner's decision.
+
+The scopes back this up wherever Google can. A `user` account is never granted `gmail.compose` or
+`gmail.settings.sharing`, so it cannot touch forwarding, send-as or delegates either. That holds for
+a delegated key too: even when the admin console authorised it for everything, the token vgoog mints
+for a `user` account leaves those two out.
+
+**Setting a tier.** The wizard asks "Whose mailbox is this?" when you add an account. On the command
+line, `vgoog login --account <name> --tier ai` creates or replaces an account at that tier, and
+`--tier` defaults to `user`. To change an existing account without signing in again, set
+`tier = "ai"` or `tier = "user"` under its `[accounts.<name>]` table in `config.toml`; the next
+vgoog command uses it. `vgoog accounts` and `vgoog status` print each account's tier.
+
+An account saved before tiers existed has no `tier` line and loads as `user`. Nothing sends as a
+person until someone has said it may.
 
 ### Getting OAuth Credentials
 
@@ -213,7 +246,12 @@ written by `vaulty secrets pull`. That covers both a missing `config.toml` and o
 ```
 VGOOG_SERVICE_ACCOUNT_KEY   the key file, minified to one line
 VGOOG_SUBJECTS              comma-separated addresses — ONE ACCOUNT EACH, first is the default
+VGOOG_AI_SUBJECTS           comma-separated addresses restored as ai accounts, the ones that may send
 ```
+
+Addresses in `VGOOG_SUBJECTS` restore as `user` accounts and those in `VGOOG_AI_SUBJECTS` as `ai`
+accounts (see [Trust tiers](#trust-tiers)). An address on both lists ends up `user`, so a mistake in
+the file can never let vgoog send as a person.
 
 Each subject becomes an account named after the part before the `@`, so `uri@yourdomain.com` becomes the account `uri`. For OAuth, the file needs these three values instead:
 
@@ -221,7 +259,7 @@ Each subject becomes an account named after the part before the `@`, so `uri@you
 VGOOG_CLIENT_ID  VGOOG_CLIENT_SECRET  VGOOG_REFRESH_TOKEN
 ```
 
-The OAuth values restore a single account named `default`. A delegated key wins when both are present. Add `VGOOG_STRATEGY=oauth` to the file to restore the OAuth account instead, or `VGOOG_STRATEGY=service_account` to refuse the OAuth fallback when the key is missing or unreadable. Nothing to run: the next `vgoog` command picks it up
+The OAuth values restore a single account named `default`, as a `user` account. A delegated key wins when both are present. Add `VGOOG_STRATEGY=oauth` to the file to restore the OAuth account instead, or `VGOOG_STRATEGY=service_account` to refuse the OAuth fallback when the key is missing or unreadable. Nothing to run: the next `vgoog` command picks it up
 and writes its own config.
 
 ### Required Scopes
@@ -232,6 +270,9 @@ and writes its own config.
 vgoog scopes         # the 15 an OAuth login requests
 vgoog scopes --all   # 17, adding the Workspace-admin scopes a delegated key can use
 ```
+
+A `user` account never holds two of them, `gmail.compose` and `gmail.settings.sharing`, whatever was
+authorised (see [Trust tiers](#trust-tiers)).
 
 ### Checking it works
 
@@ -701,6 +742,7 @@ vgoog surfaces errors transparently in the status bar:
 | `API error (4xx/5xx)` | Google API returns an error (quota, permission, bad request) |
 | `Rate limited` | 429 Too Many Requests with retry-after |
 | `Not found` | Resource doesn't exist |
+| `Denied` | vgoog refused the request itself, before sending it: mail sent from a `user` account, or from an `ai` account with no scope that can send |
 | `Config error` | Missing or malformed config file |
 | `HTTP error` | Network connectivity issues |
 
