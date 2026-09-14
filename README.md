@@ -110,6 +110,7 @@ Google accounts.
 ```sh
 vgoog                  # open the TUI, or the setup wizard if nothing is configured
 vgoog login            # browser sign-in with a Desktop OAuth client
+vgoog accounts         # every account, its trust tier, and the address it acts as
 vgoog doctor           # accounts, credential kinds, and whether Google is reachable
 vgoog list             # every service and its action names
 vgoog exec gmail list_messages '{"query":"is:unread","max_results":20}'   # one action, JSON back
@@ -119,7 +120,11 @@ It needs a one-time setup in Google Cloud: enable the Workspace APIs, create a *
 app** OAuth client, and run `vgoog login`. On Workspace you can use a service account
 with domain-wide delegation instead. vgoog can also rebuild its accounts from `VGOOG_*`
 keys that it reads straight out of `~/.config/secrets.env`.
-Full docs: [vgoog/README.md](vgoog/README.md).
+
+Every account has a **trust tier**. A `user` account is a person's own: vgoog reads, labels and
+drafts in it but **never sends mail from it**. Only an `ai` account, the assistant's own mailbox,
+can send. New accounts are `user` unless you sign them in with `vgoog login --tier ai`. See
+[Trust tiers](vgoog/README.md#trust-tiers). Full docs: [vgoog/README.md](vgoog/README.md).
 
 ## pocket
 
