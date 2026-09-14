@@ -94,9 +94,12 @@ waspy ask what did jen last say to me   # plain English, answered by Claude on y
 waspy status                   # where it reads from and how fresh that is
 ```
 
-Your terminal can read WhatsApp's database directly, so results there are live. A process macOS
-will not let in, such as vaulty's daemon, reads a copy that a launchd job refreshes every two
-minutes, and every reply says how old it is. Full docs: [waspy/README.md](waspy/README.md).
+Run in a terminal, waspy reads WhatsApp's database directly, so results are live. Anything in the
+background, such as vaulty or a script, reads a copy instead and never touches the original, and
+every reply says how old the copy is. A launchd job refreshes it every two minutes, but only once
+`~/.cargo/bin/waspy` has **Full Disk Access**: without it, macOS asks "would like to access data
+from other apps" on every run, because it does not remember "Allow" for a command-line tool. Full
+docs: [waspy/README.md](waspy/README.md).
 
 ## vgoog
 
@@ -244,7 +247,8 @@ cargo install --path vgoog
 # phog — needs rust 1.88+
 cargo install --path phog
 
-# waspy — builds, signs, and schedules its sync job; safe to rerun
+# waspy — builds, signs, and schedules its sync job; safe to rerun. Then give
+# ~/.cargo/bin/waspy Full Disk Access (it opens the pane) so the job can keep the copy fresh.
 waspy/bin/install
 
 # pocket — needs rust 1.88+, plus node for search
