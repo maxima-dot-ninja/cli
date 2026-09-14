@@ -1,6 +1,6 @@
 # _cli
 
-Personal command-line tools. One repo, seven independent tools, no shared build.
+Personal command-line tools. One repo, eight independent tools, no shared build.
 
 | Tool | What it does | Stack | Skill |
 |---|---|---|---|
@@ -8,6 +8,7 @@ Personal command-line tools. One repo, seven independent tools, no shared build.
 | [**agree**](agree/README.md) | Invoices, agreements and contacts on the Agree API | Rust | ✅ |
 | [**vgoog**](vgoog/README.md) | All of Google Workspace — Gmail, Calendar, Drive, Sheets, Docs | Rust | ✅ |
 | [**pocket**](pocket/README.md) | Export and search recorded conversations | Rust | ✅ |
+| [**waspy**](waspy/README.md) | Read your WhatsApp from the terminal, read-only | Rust | ✅ |
 | [**phog**](phog/README.md) | PostHog — HogQL, people by fingerprint, dashboards as files | Rust | ✅ |
 | [**lgit**](lgit/README.md) | AI-written commit messages, and a plain-English `status` | Rust | — |
 | **ccx** | Claude Code launcher with auto-named sessions | Bash | — |
@@ -77,6 +78,25 @@ The agent plans and calls tools one at a time, but never touches the API itself 
 never sees your key — and every change stops for confirmation. Amounts are handled
 in integer cents throughout, because the API bills in cents and sending `50` for
 "$50" charges 50 cents. Full docs: [agree/README.md](agree/README.md).
+
+## waspy
+
+WhatsApp Spy. It reads your WhatsApp straight out of the desktop app's own database, and it is
+read-only: it opens that database read-only and has no way to send, edit or delete anything.
+
+```sh
+waspy                          # arrow-key menu
+waspy chats                    # recent chats: when, unread count, name, last message
+waspy unread                   # every chat with unread messages, and those messages
+waspy read mum --since 2d      # a chat's messages; any part of its name works
+waspy search invoice march     # messages containing every word, newest first
+waspy ask what did jen last say to me   # plain English, answered by Claude on your subscription
+waspy status                   # where it reads from and how fresh that is
+```
+
+Your terminal can read WhatsApp's database directly, so results there are live. A process macOS
+will not let in, such as vaulty's daemon, reads a copy that a launchd job refreshes every two
+minutes, and every reply says how old it is. Full docs: [waspy/README.md](waspy/README.md).
 
 ## vgoog
 
@@ -224,6 +244,9 @@ cargo install --path vgoog
 # phog — needs rust 1.88+
 cargo install --path phog
 
+# waspy — builds, signs, and schedules its sync job; safe to rerun
+waspy/bin/install
+
 # pocket — needs rust 1.88+, plus node for search
 cargo install --path pocket
 ```
@@ -277,6 +300,7 @@ config file**, so this one file overrides almost everything. There are two excep
 | **phog** | `POSTHOG_PERSONAL_API_KEY`, `POSTHOG_PROJECT_ID`, `POSTHOG_APP_HOST` (optional) | `~/.config/phog/config.toml` |
 | **vgoog** | reads its `VGOOG_*` keys from `secrets.env` itself; `VGOOG_CONFIG_DIR` moves its config | `~/Library/Application Support/vgoog/config.toml` on macOS |
 | **lgit** | none when committing; `lgit --setup` copies `ANTHROPIC_API_KEY`, … into the config | `~/.config/lgit/config.toml` |
+| **waspy** | — | — (reads WhatsApp's own database; nothing to configure) |
 | **ccx** | — | — |
 
 Every config file lives in `~/.config/<tool>/`, or under `$XDG_CONFIG_HOME` when that is set.

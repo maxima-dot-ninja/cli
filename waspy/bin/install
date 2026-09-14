@@ -1,0 +1,68 @@
+#!/usr/bin/env bash
+# Build waspy, sign it, and keep a fresh copy of WhatsApp's database for anything that cannot read
+# the original (vaulty's daemon). Safe to run again: every step replaces what the last run made.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+BIN="$HOME/.cargo/bin/waspy"
+JOB="ninja.maxima.waspy.sync"
+PLIST="$HOME/Library/LaunchAgents/$JOB.plist"
+
+echo "→ building and installing"
+cargo install --path . --quiet
+
+# macOS ties a Full Disk Access grant to the binary's signature. Ad-hoc (the linker's default)
+# changes with every build, which would quietly revoke the grant each time; a real identity keeps
+# it across rebuilds.
+IDENTITY="${WASPY_SIGN_IDENTITY:-$(security find-identity -v -p codesigning | awk -F'"' '/Apple Development/ { print $2; exit }')}"
+if [ -n "$IDENTITY" ]; then
+  echo "→ signing with $IDENTITY"
+  # A keychain prompt nobody answers would hang here forever; two minutes is plenty to click it.
+  perl -e 'alarm shift; exec @ARGV' 120 codesign --force --sign "$IDENTITY" --identifier ninja.maxima.waspy "$BIN"
+else
+  echo "! no Apple Development identity found — left ad-hoc signed; the Full Disk Access grant will need redoing after each rebuild"
+fi
+
+echo "→ scheduling the sync job ($JOB, every 2 minutes)"
+STATUS="${XDG_DATA_HOME:-$HOME/.local/share}/waspy/sync.json"
+mkdir -p "$(dirname "$PLIST")"
+cat > "$PLIST" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>$JOB</string>
+  <key>ProgramArguments</key>
+  <array><string>$BIN</string><string>sync</string><string>--quiet</string></array>
+  <key>StartInterval</key><integer>120</integer>
+  <key>RunAtLoad</key><true/>
+  <key>ProcessType</key><string>Background</string>
+</dict>
+</plist>
+PLIST
+# The job's first run (RunAtLoad) is what answers whether it may read WhatsApp, so clear the
+# last result first and wait for the job's own.
+rm -f "$STATUS"
+launchctl bootout "gui/$(id -u)/$JOB" 2>/dev/null || true
+launchctl bootstrap "gui/$(id -u)" "$PLIST"
+for _ in $(seq 1 30); do [ -f "$STATUS" ] && break; sleep 0.5; done
+
+if grep -q '"ok":true' "$STATUS" 2>/dev/null; then
+  echo "✓ the sync job read WhatsApp on its own — no Full Disk Access needed"
+  echo
+  "$BIN" status
+  exit 0
+fi
+
+echo "! the sync job does not have Full Disk Access yet, so it has not touched WhatsApp (and asked nothing)"
+echo "→ making a copy from this terminal, which can read it, so there is one right away"
+"$BIN" sync || true
+echo
+"$BIN" status
+echo
+echo "Last step, and only you can do it: add $BIN under"
+echo "System Settings → Privacy & Security → Full Disk Access (opening it now)."
+echo "In the file picker press ⌘⇧G and paste $BIN — ~/.cargo is a hidden folder."
+echo "Do not rely on the \"would like to access data from other apps\" popup: its Allow is not"
+echo "remembered for a command-line tool. The sync job starts copying within two minutes of the grant."
+open "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles" 2>/dev/null || true
