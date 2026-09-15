@@ -208,8 +208,12 @@ those insights beside the originals and leaves the originals alone, so you delet
 originals by hand once the copies look right.
 
 `export` turns a dashboard back into a file. Managed insights keep their keys; hand-made ones
-get a key from their name. Anything the shorthands cannot express comes back as `raw`, which
-round-trips exactly.
+get a key from their name. A HogQL table comes back as `hogql`, and any query that is not a
+trends, funnel or HogQL query comes back as `raw`, which round-trips exactly. **Trends and
+funnels always come back as shorthand**, and the shorthand keeps only the fields it has. An
+action series or a formula is dropped, a person breakdown turns into an event breakdown, and
+a funnel window measured in months comes back as `m`, which apply reads as minutes. Compare
+an exported trends or funnel insight with the original before you apply the file.
 
 ### What it never does
 
@@ -218,7 +222,7 @@ file — and `--no-prune` keeps even those. It never touches insights it did not
 a dashboard is its own command. It asks first unless you pass `--yes`, and it leaves the
 dashboard's insights in place. Both kinds of removal work by setting PostHog's `deleted` flag.
 
-## Notes on the API
+## How phog talks to the API
 
 - The private API lives on the app host (`us.posthog.com`), not the ingest host
   (`us.i.posthog.com`). Pointing the key at the wrong one is a 404 on everything.

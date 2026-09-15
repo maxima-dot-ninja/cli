@@ -48,7 +48,7 @@ launchctl bootstrap "gui/$(id -u)" "$PLIST"
 for _ in $(seq 1 30); do [ -f "$STATUS" ] && break; sleep 0.5; done
 
 if grep -q '"ok":true' "$STATUS" 2>/dev/null; then
-  echo "✓ the sync job read WhatsApp on its own — no Full Disk Access needed"
+  echo "✓ the sync job can read WhatsApp: waspy has Full Disk Access, so there is nothing else to do"
   echo
   "$BIN" status
   exit 0

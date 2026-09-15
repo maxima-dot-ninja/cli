@@ -417,19 +417,133 @@ impl<'a> GmailApi<'a> {
     }
 }
 
-/// Build a base64url-encoded RFC 2822 message
+/// Build a base64url-encoded RFC 2822 message. The body goes out as multipart/alternative: the text
+/// as written, and an HTML copy where a blank line starts a new `<p>` and a single newline is a
+/// `<br>`. Sent as text/plain alone, the line breaks were left to each client's reflow.
 pub fn build_raw_email(to: &str, subject: &str, body: &str, cc: Option<&str>, bcc: Option<&str>) -> String {
-    let mut msg = format!("To: {to}\r\nSubject: {subject}\r\n");
+    let mut msg = format!("To: {to}\r\nSubject: {}\r\n", encode_header(subject));
     if let Some(cc) = cc {
         msg.push_str(&format!("Cc: {cc}\r\n"));
     }
     if let Some(bcc) = bcc {
         msg.push_str(&format!("Bcc: {bcc}\r\n"));
     }
-    msg.push_str("Content-Type: text/plain; charset=utf-8\r\n\r\n");
-    msg.push_str(body);
+    let body = normalize_newlines(body);
+    msg.push_str(&format!("MIME-Version: 1.0\r\nContent-Type: multipart/alternative; boundary=\"{BOUNDARY}\"\r\n\r\n"));
+    msg.push_str(&mime_part("text/plain", &body.replace('\n', "\r\n")));
+    msg.push_str(&mime_part("text/html", &body_html(&body)));
+    msg.push_str(&format!("--{BOUNDARY}--\r\n"));
 
     use base64::engine::general_purpose::URL_SAFE_NO_PAD;
     use base64::Engine;
     URL_SAFE_NO_PAD.encode(msg.as_bytes())
+}
+
+/// Fixed, so the same input always builds the same message. Both parts are base64, whose alphabet has
+/// no `_`, so no line of content can match it.
+const BOUNDARY: &str = "vgoog_alt_boundary";
+
+/// One part of the alternative, base64 wrapped at 76 columns. Base64 carries every byte and every line
+/// break through untouched, UTF-8 and over-long lines included.
+fn mime_part(content_type: &str, content: &str) -> String {
+    use base64::engine::general_purpose::STANDARD;
+    use base64::Engine;
+    let encoded = STANDARD.encode(content);
+    let lines: Vec<_> = encoded.as_bytes().chunks(76).map(String::from_utf8_lossy).collect();
+    format!(
+        "--{BOUNDARY}\r\nContent-Type: {content_type}; charset=utf-8\r\nContent-Transfer-Encoding: base64\r\n\r\n{}\r\n",
+        lines.join("\r\n")
+    )
+}
+
+/// `\r\n` and a lone `\r` both become `\n`, so a body from any platform splits the same way.
+fn normalize_newlines(body: &str) -> String {
+    body.replace("\r\n", "\n").replace('\r', "\n")
+}
+
+/// Each `\n\n` closes a paragraph and each remaining `\n` is a `<br>`, so every newline in the body
+/// shows up in the HTML.
+fn body_html(body: &str) -> String {
+    body.split("\n\n").map(paragraph_html).collect()
+}
+
+/// An empty paragraph (four newlines in a row, or a body ending in a blank line) holds a `<br>`, so
+/// the gap renders instead of collapsing into the paragraph margin.
+fn paragraph_html(text: &str) -> String {
+    if text.is_empty() {
+        return "<p><br></p>".to_string();
+    }
+    format!("<p>{}</p>", escape_html(text).replace('\n', "<br>"))
+}
+
+fn escape_html(text: &str) -> String {
+    text.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
+}
+
+/// Header values are 7-bit. A UTF-8 subject written as-is reaches Gmail as mojibake (`✓` became
+/// `âœ“`), so anything non-ASCII goes out as an RFC 2047 encoded word.
+fn encode_header(value: &str) -> String {
+    if value.is_ascii() {
+        return value.to_string();
+    }
+    use base64::engine::general_purpose::STANDARD;
+    use base64::Engine;
+    format!("=?UTF-8?B?{}?=", STANDARD.encode(value))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn non_ascii_subject_is_encoded() {
+        assert_eq!(encode_header("Hi"), "Hi");
+        assert_eq!(encode_header("✓"), "=?UTF-8?B?4pyT?=");
+    }
+
+    fn decode(raw: &str) -> String {
+        use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+        use base64::Engine;
+        String::from_utf8(URL_SAFE_NO_PAD.decode(raw).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn message_is_multipart_alternative_with_text_and_html() {
+        use base64::engine::general_purpose::STANDARD;
+        use base64::Engine;
+        let msg = decode(&build_raw_email("a@b.c", "Hi", "one\ntwo\n\nthree", None, None));
+        let part = |kind: &str, content: &str| {
+            format!("Content-Type: {kind}; charset=utf-8\r\nContent-Transfer-Encoding: base64\r\n\r\n{}\r\n", STANDARD.encode(content))
+        };
+        assert!(msg.contains("MIME-Version: 1.0\r\nContent-Type: multipart/alternative; boundary=\"vgoog_alt_boundary\"\r\n"));
+        assert!(msg.contains(&part("text/plain", "one\r\ntwo\r\n\r\nthree")), "{msg}");
+        assert!(msg.contains(&part("text/html", "<p>one<br>two</p><p>three</p>")), "{msg}");
+        assert!(msg.ends_with("\r\n--vgoog_alt_boundary--\r\n"));
+    }
+
+    #[test]
+    fn every_newline_style_builds_the_same_message() {
+        let unix = build_raw_email("a@b.c", "Hi", "a\nb\n\nc", None, None);
+        assert_eq!(build_raw_email("a@b.c", "Hi", "a\r\nb\r\n\r\nc", None, None), unix);
+        assert_eq!(build_raw_email("a@b.c", "Hi", "a\rb\r\rc", None, None), unix);
+    }
+
+    #[test]
+    fn every_newline_reaches_the_html() {
+        assert_eq!(body_html("a\nb\n\nc"), "<p>a<br>b</p><p>c</p>");
+        assert_eq!(body_html("a\n\n\nb"), "<p>a</p><p><br>b</p>");
+        assert_eq!(body_html("a\n\n\n\nb"), "<p>a</p><p><br></p><p>b</p>");
+        assert_eq!(body_html("a\n"), "<p>a<br></p>");
+    }
+
+    #[test]
+    fn body_text_is_escaped_not_rendered() {
+        assert_eq!(body_html("1 < 2 & \"<b>\""), "<p>1 &lt; 2 &amp; &quot;&lt;b&gt;&quot;</p>");
+    }
+
+    #[test]
+    fn long_bodies_wrap_at_76_columns() {
+        let msg = decode(&build_raw_email("a@b.c", "Hi", &"x".repeat(500), None, None));
+        assert!(msg.lines().all(|l| l.len() <= 76), "{msg}");
+    }
 }

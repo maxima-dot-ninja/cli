@@ -1,4 +1,4 @@
-use crate::api::gmail::GmailApi;
+use crate::api::gmail::{build_raw_email, GmailApi};
 use crate::client::GoogleClient;
 use crate::error::{Result, VgoogError};
 use serde_json::Value;
@@ -22,6 +22,28 @@ fn str_array(args: &Value, key: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// The message to save or send, as base64url RFC 2822. Callers arrive with one of three shapes: our
+/// `raw`, Gmail's own `{"message": {"raw": ...}}`, or plain `to` / `subject` / `body` (top level or
+/// under `message`). Reading only the first meant the other two sent Gmail an empty string, and
+/// Gmail saved a blank draft with only From and Date — no error, just a lost message.
+fn raw_message(args: &Value) -> Result<String> {
+    let raw = str_opt(args, "raw")
+        .or_else(|| args.pointer("/message/raw").and_then(Value::as_str))
+        .unwrap_or("");
+    if !raw.is_empty() {
+        return Ok(raw.to_string());
+    }
+
+    let fields = args.get("message").filter(|m| m.is_object()).unwrap_or(args);
+    let to = str_field(fields, "to");
+    if to.is_empty() {
+        return Err(VgoogError::Other(
+            "needs raw (base64url RFC 2822), message.raw, or to with subject and body".into(),
+        ));
+    }
+    Ok(build_raw_email(to, str_field(fields, "subject"), str_field(fields, "body"), str_opt(fields, "cc"), str_opt(fields, "bcc")))
+}
+
 pub async fn execute(client: &GoogleClient, action: &str, args: Value) -> Result<Value> {
     let api = GmailApi::new(client);
     match action {
@@ -29,7 +51,7 @@ pub async fn execute(client: &GoogleClient, action: &str, args: Value) -> Result
             api.list_messages(str_opt(&args, "query"), None, u32_field(&args, "max_results", 20), str_opt(&args, "page_token")).await
         }
         "get_message" => api.get_message(str_field(&args, "id"), str_opt(&args, "format").unwrap_or("full")).await,
-        "send_message" => api.send_message(str_field(&args, "raw")).await,
+        "send_message" => api.send_message(&raw_message(&args)?).await,
         "trash_message" => api.trash_message(str_field(&args, "id")).await,
         "untrash_message" => api.untrash_message(str_field(&args, "id")).await,
         "delete_message" => api.delete_message(str_field(&args, "id")).await,
@@ -95,8 +117,8 @@ pub async fn execute(client: &GoogleClient, action: &str, args: Value) -> Result
         "delete_label" => api.delete_label(str_field(&args, "id")).await,
         "list_drafts" => api.list_drafts(u32_field(&args, "max_results", 20), str_opt(&args, "page_token")).await,
         "get_draft" => api.get_draft(str_field(&args, "id"), str_opt(&args, "format").unwrap_or("full")).await,
-        "create_draft" => api.create_draft(str_field(&args, "raw")).await,
-        "update_draft" => api.update_draft(str_field(&args, "id"), str_field(&args, "raw")).await,
+        "create_draft" => api.create_draft(&raw_message(&args)?).await,
+        "update_draft" => api.update_draft(str_field(&args, "id"), &raw_message(&args)?).await,
         "send_draft" => api.send_draft(str_field(&args, "id")).await,
         "delete_draft" => api.delete_draft(str_field(&args, "id")).await,
         "get_vacation_settings" => api.get_vacation_settings().await,
@@ -132,5 +154,35 @@ pub async fn execute(client: &GoogleClient, action: &str, args: Value) -> Result
             str_opt(&args, "page_token"),
         ).await,
         _ => Err(VgoogError::Other(format!("Unknown gmail action: {action}"))),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn raw_passes_through() {
+        assert_eq!(raw_message(&json!({ "raw": "abc" })).unwrap(), "abc");
+    }
+
+    #[test]
+    fn gmail_message_shape_is_read() {
+        // The shape that produced blank drafts: Gmail's request body, handed over as-is.
+        assert_eq!(raw_message(&json!({ "message": { "raw": "abc" } })).unwrap(), "abc");
+    }
+
+    #[test]
+    fn plain_fields_are_built_into_a_message() {
+        let expected = build_raw_email("a@b.c", "Hi", "Body", None, None);
+        assert_eq!(raw_message(&json!({ "to": "a@b.c", "subject": "Hi", "body": "Body" })).unwrap(), expected);
+        assert_eq!(raw_message(&json!({ "message": { "to": "a@b.c", "subject": "Hi", "body": "Body" } })).unwrap(), expected);
+    }
+
+    #[test]
+    fn no_message_is_refused_rather_than_saved_blank() {
+        assert!(raw_message(&json!({})).is_err());
+        assert!(raw_message(&json!({ "raw": "" })).is_err());
     }
 }

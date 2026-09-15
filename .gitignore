@@ -1,7 +1,8 @@
-# Rust (lgit, merc, agree, vgoog, phog, waspy)
+# Rust (every tool except ccx)
 target/
 
-# Node / Bun (pocket)
+# Node — no tool here has Node packages any more (pocket only runs qmd through npx);
+# kept so a stray node_modules is never committed
 node_modules/
 *.tsbuildinfo
 

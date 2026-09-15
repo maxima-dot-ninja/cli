@@ -11,18 +11,20 @@ Personal command-line tools. One repo, eight independent tools, no shared build.
 | [**waspy**](waspy/README.md) | Read your WhatsApp from the terminal, read-only | Rust | ✅ |
 | [**phog**](phog/README.md) | PostHog — HogQL, people by fingerprint, dashboards as files | Rust | ✅ |
 | [**lgit**](lgit/README.md) | AI-written commit messages, and a plain-English `status` | Rust | — |
-| **ccx** | Claude Code launcher with auto-named sessions | Bash | — |
+| [**ccx**](ccx/README.md) | Claude Code launcher that resumes a folder's last session and names new ones | Bash | — |
 
 Each tool stands alone — install only what you want.
 
 ## Skills
 
-A tool with a `SKILL.md` beside it is also an **agent skill**. One file, two readers:
+A tool with a `SKILL.md` beside it is also an **agent skill**, and that one file is read by two
+harnesses:
 
-- **[vaulty](https://github.com/…/vaulty)** parses the YAML frontmatter — tool names, JSON-Schema
-  inputs and argv templates — and mounts them as tools. `vaulty skills add <tool>`. No restart.
-- **Claude Code** reads the same file's `name` + `description` and renders the markdown body.
-  `ln -s "$PWD/<tool>" ~/.claude/skills/<tool>`.
+- **vaulty** reads the YAML frontmatter — tool names, JSON-Schema inputs and argv templates — and
+  mounts each tool for its agent. `vaulty skills add <tool>` brings a skill in, and it is live on
+  the next message without a restart.
+- **Claude Code** reads the same file's `name` and `description` and renders its markdown body. You
+  add a tool there by linking it: `ln -s "$PWD/<tool>" ~/.claude/skills/<tool>`.
 
 ```
 <tool>/
@@ -31,10 +33,18 @@ A tool with a `SKILL.md` beside it is also an **agent skill**. One file, two rea
   README.md     for humans
 ```
 
-Writing one: the format is documented in vaulty at `src/core/organs/SKILLS_GUIDE.md`, and
-`vaulty skills check <tool>` reports every problem in a manifest at once.
+The format is documented in vaulty at `src/core/skills/innate/SKILLS_GUIDE.md`, and
+`vaulty skills check <tool>` reports every problem in a manifest at once. Two rules catch people out:
 
-**Nothing about a skill changes how the tool works in a terminal.** The manifest is additive.
+- **Every manifest must end with the `## Finish it — never hand it back` section**, copied from the
+  guide, followed by one line saying what "done" means for that tool and which of its actions cannot
+  be undone. vaulty refuses a manifest without it.
+- **`vaulty skills add` copies a manifest from this repo only once.** After that, vaulty's own copy
+  in its `skills/` folder is the source of truth, and a later edit here does not reach it until you
+  copy the file over and run `vaulty skills add <tool>` again. A rejected `add` leaves its copy
+  behind too, so fix that copy rather than the one here.
+
+**Nothing about a skill changes how the tool works in a terminal.** The manifest only adds to it.
 
 ## merc
 
@@ -90,16 +100,19 @@ waspy chats                    # recent chats: when, unread count, name, last me
 waspy unread                   # every chat with unread messages, and those messages
 waspy read mum --since 2d      # a chat's messages; any part of its name works
 waspy search invoice march     # messages containing every word, newest first
-waspy ask what did jen last say to me   # plain English, answered by Claude on your subscription
+waspy ask what did jen last say to me   # a plain-English question; Claude answers, formatted
 waspy status                   # where it reads from and how fresh that is
 ```
 
+`search` matches words, not meaning. A question in plain English goes to `ask`, which has Claude
+read your chats through waspy and prints the answer formatted, with bold, lists and tables.
+
 Run in a terminal, waspy reads WhatsApp's database directly, so results are live. Anything in the
 background, such as vaulty or a script, reads a copy instead and never touches the original, and
-every reply says how old the copy is. A launchd job refreshes it every two minutes, but only once
-`~/.cargo/bin/waspy` has **Full Disk Access**: without it, macOS asks "would like to access data
-from other apps" on every run, because it does not remember "Allow" for a command-line tool. Full
-docs: [waspy/README.md](waspy/README.md).
+every reply says how old the copy is. A launchd job checks every two minutes and copies whenever
+WhatsApp has changed, but only once `~/.cargo/bin/waspy` has **Full Disk Access**: without it,
+macOS asks "would like to access data from other apps" on every run, because it does not remember
+"Allow" for a command-line tool. Full docs: [waspy/README.md](waspy/README.md).
 
 ## vgoog
 
@@ -128,24 +141,28 @@ can send. New accounts are `user` unless you sign them in with `vgoog login --ti
 
 ## pocket
 
-Pulls recordings from the [Pocket AI API](https://docs.heypocketai.com/docs/api) and
-searches them in natural language.
+Pulls your recordings from the [Pocket AI API](https://docs.heypocketai.com/docs/api) to
+disk, as a transcript and a summary each, and searches them in natural language.
 
 ```sh
 pocket                                  # arrow-key menu
 pocket list                             # id, date and title of each recording
 pocket export all                       # export recordings and re-index search
 pocket search what did we decide about pricing
-pocket search "pricing" --fast --json   # skip reranking, print JSON for scripts
+pocket search "pricing" -n 10 --fast --json   # skip reranking, print JSON for scripts
 ```
 
 Search runs **entirely on-device** via [qmd](https://github.com/tobi/qmd), which does
-hybrid keyword and vector search with local reranking. Nothing is uploaded. qmd runs
-through `npx`, so search needs Node, and the first search downloads about 2GB of
-models.
+hybrid keyword and vector search with local reranking, so nothing is uploaded. pocket
+itself is one Rust binary, but it starts qmd through `npx`, so **search and export both
+need Node 22+** (every export re-indexes). The first index and the first search download
+about 2.2GB of models.
 
 **`list` and `export all` only see the first 100 recordings**, because pocket reads a
-single page from the API.
+single page from the API. **Two recordings can also land in the same folder** and
+overwrite each other: a folder is named from the title and the day, so untitled
+recordings from one day, titles with no Latin letters, and titles that match in their
+first 60 characters all collide.
 
 Exports live in `~/dev/pocket-exports/`, one folder per recording, unless you set
 `POCKET_EXPORT_DIR`. Full docs: [pocket/README.md](pocket/README.md).
@@ -186,54 +203,41 @@ Full docs: [lgit/README.md](lgit/README.md).
 
 ## ccx
 
-Claude Code with permissions bypassed and remote control on. It also names each
-session automatically, so parallel sessions are easy to tell apart.
+Launches Claude Code with permissions bypassed and Remote Control on. By default it **resumes this
+folder's last ended session**; otherwise it starts a new one named after the folder, so parallel
+sessions are easy to tell apart.
 
 ```sh
-cd dev/_www/croissant/api && ccx
-# session is named croissant-api-000
-```
-
-The name is the **last two path components** plus a counter. A second session in the
-same folder becomes `croissant-api-001`, and a third becomes `002`.
-
-**A number is never reused.** ccx treats a name as taken when a running session holds
-it (from `~/.claude/sessions/`) or when it has ever appeared as a title in any
-transcript under `~/.claude/projects/`. Ended sessions keep their names in the
-`/resume` picker without collisions, and a number only comes free again when its
-transcript is deleted.
-
-Pass your own `--name` to opt out. All other args go straight through to `claude`.
-
-```sh
-ccx details [dir]    # every session of a folder (default: here), with a summary
-```
-
-Each session gets its start date and name on one line, with a one-sentence summary
-indented under it. The summary comes from `claude -p --model haiku` on your normal
-login, so no API key is needed. Running sessions are listed but not summarized,
-because they are still changing.
-
-Summaries are cached in `~/.config/ccx/summaries/`, keyed on the transcript's last
-timestamp. A resumed session is summarized again, and a failed call is not cached,
-so the next run retries it. The first run takes a while and reruns are instant.
-
-```sh
-ccx cleanup [dir]     # renumber ended sessions so no two share a title
-ccx cleanup --all     # the same, for every project Claude knows about
+ccx                   # resume this folder's last ended session, or start a new one
+ccx new               # always start a new, auto-named session
+ccx details [dir]     # every session of a folder, each with a one-sentence summary
 ccx delete <name...>  # delete sessions by name, from any folder
 ccx clear-all [dir]   # delete every ended session of a folder
-ccx help              # print this list
 ```
 
-**Running sessions are never touched.** `cleanup` skips them and keeps their names
-reserved, `delete` leaves them alone, and `clear-all` keeps them along with the
-folder's `memory/`. Rerunning `cleanup` on a folder that is already tidy writes nothing.
+Plain `ccx` looks through this folder's transcripts in `~/.claude/projects/`, skips any session a
+running Claude still holds, and resumes the one with the newest message under its own title. When
+there is nothing to resume, or you pass your own `--name`, it starts a new session, and `ccx new`
+always does. Every launch runs `claude --dangerously-skip-permissions --remote-control <name> --name
+<name>`, adds `--resume <id>` when it resumes, and passes your own arguments on at the end.
+
+A new session is named after the **last two parts of its path** plus the lowest free three-digit
+number, so `~/dev/_www/croissant/api` starts at `croissant-api-000`. A name counts as taken while a
+running session holds it or while any transcript still carries it as a title, so a number only
+comes free again once its transcript is deleted.
+
+`ccx details` prints each session's start date and name with a one-sentence summary written by
+`claude -p --model haiku` on your normal login, so no API key is needed. Summaries are cached in
+`~/.config/ccx/summaries/` and redone only when a session has grown. `delete` and `clear-all` never
+touch a running session, `clear-all` keeps the folder's `memory/`, and neither asks before deleting.
+
+**`ccx cleanup` does not work right now.** The script calls a function that was never written, so
+it stops with `cleanup: command not found` and renames nothing. Full docs: [ccx/README.md](ccx/README.md).
 
 ## Install
 
 ```sh
-# ccx — needs bash and claude
+# ccx — needs bash, claude, and jq (for ccx details)
 chmod +x ccx/ccx
 ln -s "$PWD/ccx/ccx" /opt/homebrew/bin/ccx
 
@@ -256,7 +260,7 @@ cargo install --path phog
 # ~/.cargo/bin/waspy Full Disk Access (it opens the pane) so the job can keep the copy fresh.
 waspy/bin/install
 
-# pocket — needs rust 1.88+, plus node for search
+# pocket — needs rust 1.88+, and node 22+ for search and export
 cargo install --path pocket
 ```
 

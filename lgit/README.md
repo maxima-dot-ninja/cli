@@ -103,8 +103,8 @@ more**, and then it stops and shows you what the model said.
   https://github.com/user/repo/compare/feature-branch?expand=1
 ```
 
-**✎ Edit message** opens the message in your editor (`$VISUAL`, or `$EDITOR` if that
-is unset), and whatever you save becomes the new suggestion.
+**✎ Edit message** opens the message in your editor (`$VISUAL`, then `$EDITOR`, then
+`vi`), and whatever you save becomes the new suggestion.
 
 ### Asking about the change
 
@@ -149,7 +149,7 @@ Ask: call this a fix, not a feat, and mention the migration
 Questions stack up, and **Regenerate honours everything you've said** — so you can
 narrow the message over a few turns instead of editing it by hand.
 
-Two things worth knowing:
+Two rules decide which files it can show:
 
 - It can only show files that are actually staged. Invented paths are dropped rather
   than guessed at, so it will never show you a diff for a file that isn't in the commit.
@@ -171,13 +171,17 @@ tags every repo that gets committed.
 ### What's going on here?
 
 `lgit status` is `git status` written for a person. It reads the branch and its
-upstream, any merge or rebase in progress, stashes, how far the branch is from
-`main`, the staged and unstaged diffs, and the first lines of new files. Then it
-answers three questions:
+upstream, when you last fetched, any merge, rebase, cherry-pick, revert or bisect in
+progress, recent and unpushed commits, stashes, how far the branch is from `main`, the
+staged and unstaged diffs, and the first lines of new files. Then it answers three
+questions:
 
 - **What are you in the middle of?** It describes the work by what it is for, not by which files changed.
-- **What could bite you?** It looks for conflicts, a staged change that won't build without an unstaged or untracked file, secrets, leftover debug code, junk that belongs in `.gitignore`, a stale fetch, and forgotten stashes.
+- **What could bite you?** It looks for conflicts, a staged change that won't build without an unstaged or untracked file, secrets, leftover debug code, junk that belongs in `.gitignore`, large or binary files, a detached HEAD or a vanished upstream, a stale fetch, and forgotten stashes.
 - **What should you do next?** It gives the commands, and says how to split the work when it should be more than one commit.
+
+Between the summary and the warnings it can add a **Changes** section that groups the
+work by purpose. Any section with nothing real to say is left out.
 
 ```
 ▸ lgit
@@ -185,15 +189,17 @@ answers three questions:
   Files: 1 staged, 2 unstaged, 1 untracked.
 
 Summary
-  You're adding an `lgit status` command. Only the README is staged; the code is not.
+  You're adding an lgit status command. Only the README is staged; the code is not.
 
 Watch out
-  • `src/main.rs` declares `mod status;`, but `src/status.rs` is untracked, so
+  • src/main.rs declares mod status;, but src/status.rs is untracked, so
     committing what's staged now would not build.
 
 Next
-  • Stage everything with `git add -A` and commit it as one feature.
+  • Stage everything with git add -A and commit it as one feature.
 ```
+
+Paths and commands print in cyan, which is why the example has no backticks.
 
 It never changes anything, and it never takes git's index lock, so it is safe to
 run in the middle of anything. The first lines come straight from git and print
@@ -256,11 +262,12 @@ set, lgit leaves `api_key` empty and that provider rejects every request. Use
 `lgit --setup` to switch in that case. When the variable is not set, `--model` asks for
 the key and saves it.
 
-**`lgit --key`** shows, for each provider, whether its key is set in the environment,
-set in the config, or not set. It saves a new key only for the provider you are using
-now. For any other provider it prints an `export` line for your shell profile, and you
-then switch with `lgit --setup` so the key lands in the config. It won't change a key
-whose variable is already set in your environment.
+**`lgit --key`** shows, for Anthropic, OpenAI and Gemini, whether each key is set in the
+environment, set in the config, or not set. It saves a new key only for the provider you
+are using now. For any other provider it saves nothing and prints an `export` line that
+holds only the key's first eight characters, so you write the full line into your shell
+profile yourself and then switch with `lgit --setup` so the key lands in the config. It
+won't change a key whose variable is already set in your environment.
 
 Ollama runs locally and needs no key at all. The Claude Code provider needs no key either: it runs `claude -p` and bills your Claude subscription, so it works anywhere you are logged into Claude Code.
 
@@ -296,8 +303,9 @@ color = true
 ```
 
 `provider.name` is one of `claude_cli`, `anthropic`, `openai`, `gemini`, or `ollama`,
-and `provider.model` is the model id that provider expects. `api_key` stays empty for
-Claude Code and Ollama. `git.auto_push` pushes after every commit and `git.pr_link`
+and `provider.model` is the model id that provider expects. Claude Code and Ollama ignore
+`api_key`. Setup leaves it empty for them, but `lgit --model` keeps the previous
+provider's key in the file when you switch to one of them. `git.auto_push` pushes after every commit and `git.pr_link`
 prints the pull request link, and both default to `true`.
 
 **`ui.color` has no effect** yet, since nothing reads it. To turn colors off, set

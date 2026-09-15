@@ -496,7 +496,7 @@ Arguments use snake_case names, but Google's camelCase spellings work too. vgoog
 
 `--account` runs that one call as a named account. If the call has to refresh that account's token, vgoog saves the config with that account marked active, so later calls without `--account` use it too.
 
-Sending mail needs the message already built. `send_message`, `create_draft` and `update_draft` take a `raw` field holding the full RFC 2822 message, base64url-encoded, and the TUI's Compose form is what builds that for you.
+`send_message`, `create_draft` and `update_draft` accept the message in any of three shapes. You can pass `raw` with the full RFC 2822 message base64url-encoded, pass Gmail's own `{"message":{"raw":"..."}}`, or pass `to`, `subject`, `body` and optionally `cc` and `bcc` as plain text, either at the top level or under `message`. vgoog builds the RFC 2822 message from the plain fields itself, as multipart/alternative with a text/plain part and a text/html part. In the HTML part a blank line starts a new paragraph and a single newline is a line break, so every newline in `body` shows in Gmail. A call with none of these is refused, so Gmail never saves a blank draft.
 
 `modify_message`, `modify_thread` and `batch_modify_messages` refuse to run without `add_labels` or `remove_labels`. Gmail's own error for that case reads like a missing permission, so vgoog names the missing argument instead.
 

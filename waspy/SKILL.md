@@ -82,15 +82,16 @@ edits or deletes anything, and it cannot: it opens the database read-only.
 
 Every reply starts with `source` and `as_of`. `live` means it read WhatsApp's database directly and
 is current to the second. `snapshot` means macOS would not let this process read the original —
-which is always the case inside vaulty — so it read the copy a launchd job refreshes every two
-minutes, and `as_of` says how old that copy is. Mention the age when it matters, for example when
+which is always the case inside vaulty — so it read the copy, and `as_of` says when that copy was
+made. A launchd job checks every two minutes but copies again only when WhatsApp has changed, so an
+old copy can simply mean nothing new has arrived. Mention the age when it matters, for example when
 the owner asks about something that happened in the last few minutes.
 
 ## What it cannot do
 
 It cannot see photos, voice notes or files, only that they were sent and any caption. It cannot
-reply. If a reply says there is no copy yet, or the copy is hours old, the sync job has stopped:
-tell the owner to run `waspy status`.
+reply. If a reply says there is no copy yet, or the owner expects a recent message the copy does
+not have, tell him to run `waspy status`, which shows whether the sync job is still checking.
 
 ## Privacy
 

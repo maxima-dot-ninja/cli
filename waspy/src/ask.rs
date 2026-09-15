@@ -122,7 +122,7 @@ pub fn run(question: &str, model: &str, json_out: bool) -> Result<()> {
         eprintln!("{}", style(format!("✗ refused: {command}")).yellow());
     }
     println!();
-    println!("{answer}");
+    crate::markdown::print(&answer);
     let plural = if lookups.len() == 1 { "" } else { "s" };
     eprintln!("{}", style(format!("\n{model} · {} lookup{plural} · {seconds} s", lookups.len())).dim());
     Ok(())
@@ -182,9 +182,11 @@ fn instructions(exe: &str, chats: &[Chat]) -> String {
          typed, and a variant or two when the first finds nothing. Use as few commands as the question needs. \
          Do not mention where the data came from. The one exception: when a reply's source is snapshot and the \
          question is about the last few minutes, say how old the copy is (its as_of).\n\n\
-         Answer in one to three short sentences: who said what, and when, quoting the message when the wording \
-         matters. Say times the way a person would (\"yesterday at 18:40\", \"on Tuesday\"). If you cannot find it, say \
-         what you looked for. Plain text, no markdown.\n\n\
+         Keep it short: one to three sentences for a simple question — who said what, and when, quoting the \
+         message when the wording matters — or a short list or a small table when the question compares several \
+         chats. Say times the way a person would (\"yesterday at 18:40\", \"on Tuesday\"). If you cannot find it, say \
+         what you looked for. Use **bold** for the names and numbers that answer the question; the answer is shown \
+         formatted, so light markdown is welcome.\n\n\
          The owner's chats, newest first (name · person or group · last message date):\n{list}"
     )
 }

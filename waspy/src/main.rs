@@ -5,6 +5,7 @@
 mod ask;
 mod commands;
 mod db;
+mod markdown;
 mod menu;
 mod render;
 mod store;
