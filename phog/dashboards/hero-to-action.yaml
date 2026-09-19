@@ -1,0 +1,124 @@
+# The homepage hero to an action: what the Ask Croissant conversation is for.
+# Apply with:  phog dashboards apply dashboards/hero-to-action.yaml
+#
+# The four actions are a card opened, a call booked or made, an email left. The
+# share of hero sessions that send one message and nothing else is the number
+# the copy and prompt work is meant to move (42% of hero sessions in the 30 days
+# to 2026-09-19).
+name: Hero to action
+slug: hero-to-action
+description: From a question typed on the homepage to a space opened, a call or an email, week by week.
+tags: [croissant]
+date_from: -30d
+
+insights:
+  - key: hero-asks
+    name: Asked from the hero
+    type: number
+    series:
+      - event: astronaut_opened
+        math: unique_session
+        properties:
+          - key: source
+            value: hero
+    layout: {x: 0, y: 0, w: 3, h: 3}
+
+  - key: cards
+    name: Opened a space
+    type: number
+    series:
+      - event: astronaut_card_clicked
+        math: unique_session
+    layout: {x: 3, y: 0, w: 3, h: 3}
+
+  - key: calls
+    name: Booked or made a call
+    type: number
+    series:
+      - event: astronaut_demo_opened
+        math: unique_session
+        name: Opened the calendar
+      - event: astronaut_specialist_called
+        math: unique_session
+        name: Tapped the number
+      - event: demo_booked
+        math: unique_session
+        name: Booked
+    layout: {x: 6, y: 0, w: 3, h: 3}
+
+  - key: emails
+    name: Left an email
+    type: number
+    series:
+      - event: astronaut_contact_submitted
+        math: unique_session
+    layout: {x: 9, y: 0, w: 3, h: 3}
+
+  - key: funnel
+    name: From the hero to an action
+    type: funnel
+    window: 7d
+    series:
+      - event: astronaut_opened
+        name: Asked from the hero
+        properties:
+          - key: source
+            value: hero
+      - event: astronaut_results_shown
+        name: Saw spaces
+      - event: astronaut_card_clicked
+        name: Opened a space
+      - event: astronaut_contact_submitted
+        name: Left an email
+    layout: {x: 0, y: 3, w: 6, h: 6}
+
+  - key: by-week
+    name: Actions by week
+    type: trend
+    interval: week
+    series:
+      - event: astronaut_opened
+        math: unique_session
+        name: Asked
+        properties:
+          - key: source
+            value: hero
+      - event: astronaut_card_clicked
+        math: unique_session
+        name: Opened a space
+      - event: astronaut_specialist_revealed
+        math: unique_session
+        name: Specialist offered
+      - event: astronaut_contact_submitted
+        math: unique_session
+        name: Email left
+      - event: astronaut_demo_opened
+        math: unique_session
+        name: Calendar opened
+    layout: {x: 6, y: 3, w: 6, h: 6}
+
+  - key: depth
+    name: Turns per conversation
+    description: How many people send a second and a third message. One message and gone is the drop-off to watch.
+    type: trend
+    interval: week
+    series:
+      - event: astronaut_message_sent
+        math: unique_session
+        name: First message
+        properties:
+          - key: turn_index
+            value: 0
+      - event: astronaut_message_sent
+        math: unique_session
+        name: Second message
+        properties:
+          - key: turn_index
+            value: 1
+      - event: astronaut_message_sent
+        math: unique_session
+        name: Third message
+        properties:
+          - key: turn_index
+            value: 2
+    layout: {x: 0, y: 9, w: 12, h: 5}
