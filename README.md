@@ -15,6 +15,24 @@ Personal command-line tools. One repo, eight independent tools, no shared build.
 
 Each tool stands alone — install only what you want.
 
+## Installing vaulty
+
+`install.sh` at the top of this repo is what a brand-new machine runs. vaulty's source is private,
+so only the compiled binary is published here, attached to a release:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/maxima-dot-ninja/cli/main/install.sh | sh
+vaulty login <code>
+```
+
+That has to be public: a machine you are setting up holds no credentials to authenticate with, and
+a compiled binary carries no secrets.
+
+The script picks the build for the machine's architecture, checks its SHA-256, and installs to
+`~/.local/bin`. It writes no config and starts nothing — a fresh vaulty has nothing to run with,
+and `vaulty login <code>` is what fixes that, with a code from `/spawn` on a machine that already
+works. Releases are published by `./bin/release` in the vaulty repo.
+
 ## Skills
 
 A tool with a `SKILL.md` beside it is also an **agent skill**, and that one file is read by two
