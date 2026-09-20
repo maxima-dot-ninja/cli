@@ -28,6 +28,18 @@ die() { printf 'error: %s\n' "$*" >&2; exit 1; }
 # ── which build ──────────────────────────────────────────────────────────────────────────
 os=$(uname -s)
 arch=$(uname -m)
+
+# `uname -m` reports the ARCHITECTURE OF THE SHELL, not of the machine. A terminal running under
+# Rosetta on Apple Silicon says x86_64, which would send us after an Intel build — the wrong binary
+# even when one exists. Ask the hardware instead: hw.optional.arm64 is 1 on every Apple Silicon Mac
+# whether or not the current process is translated.
+if [ "$os" = "Darwin" ] && [ "$arch" = "x86_64" ]; then
+  if [ "$(sysctl -n hw.optional.arm64 2>/dev/null)" = "1" ] || [ "$(sysctl -n sysctl.proc_translated 2>/dev/null)" = "1" ]; then
+    say "this shell reports x86_64, but the machine is Apple Silicon — using the arm64 build"
+    arch="arm64"
+  fi
+fi
+
 case "$os-$arch" in
   Darwin-arm64)   target="aarch64-apple-darwin" ;;
   Darwin-x86_64)  target="x86_64-apple-darwin" ;;
@@ -60,7 +72,17 @@ tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT INT TERM
 
 say "downloading…"
-curl -fsSL "$base/$tarball" -o "$tmp/$tarball" || die "could not download $base/$tarball"
+if ! curl -fsSL "$base/$tarball" -o "$tmp/$tarball"; then
+  # "could not download" on its own sends you hunting the network. The useful thing to say is that
+  # this architecture was never published, and which ones were.
+  printf 'error: no %s build published in %s\n' "$target" "$tag" >&2
+  printf '  looked for: %s\n  published:\n' "$base/$tarball" >&2
+  curl -fsSL "https://api.github.com/repos/$REPO/releases/tags/$tag" 2>/dev/null \
+    | grep -o '"name"[ ]*:[ ]*"vaulty-[^"]*\.tar\.gz"' \
+    | sed -E 's/.*"(vaulty-[^"]*)".*/    \1/' >&2
+  printf '  build it with ./bin/release in the vaulty repo.\n' >&2
+  exit 1
+fi
 
 # A truncated download is the failure that would otherwise show up much later as a confusing
 # crash, so check the hash rather than trusting the transfer.
