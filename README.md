@@ -15,24 +15,6 @@ Personal command-line tools. One repo, eight independent tools, no shared build.
 
 Each tool stands alone — install only what you want.
 
-## Installing vaulty
-
-`install.sh` at the top of this repo is what a brand-new machine runs. vaulty's source is private,
-so only the compiled binary is published here, attached to a release:
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/maxima-dot-ninja/cli/main/install.sh | sh
-vaulty login <code>
-```
-
-That has to be public: a machine you are setting up holds no credentials to authenticate with, and
-a compiled binary carries no secrets.
-
-The script picks the build for the machine's architecture, checks its SHA-256, and installs to
-`~/.local/bin`. It writes no config and starts nothing — a fresh vaulty has nothing to run with,
-and `vaulty login <code>` is what fixes that, with a code from `/spawn` on a machine that already
-works. Releases are published by `./bin/release` in the vaulty repo.
-
 ## Skills
 
 A tool with a `SKILL.md` beside it is also an **agent skill**, and that one file is read by two
@@ -285,9 +267,32 @@ cargo install --path pocket
 ccx is symlinked rather than copied, so edits to it are live immediately.
 The Rust tools are compiled, so rerun `cargo install` after you change one.
 
+## Installing vaulty
+
+This repo also carries `install.sh`, which is what a brand-new machine runs to get **vaulty** — the
+agent that drives the skills below. Its source is private, so only the compiled binary is published
+here, attached to a release:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/maxima-dot-ninja/cli/main/install.sh | sh
+vaulty login <code>
+```
+
+That has to be public: a machine you are setting up holds no credentials to authenticate with, and
+a compiled binary carries no secrets.
+
+The script picks the build for the machine's architecture, checks its SHA-256, and installs to
+`~/.local/bin`. It writes no config and starts nothing — a fresh vaulty has nothing to run with,
+and `vaulty login <code>` is what fixes that, with a code from `/spawn` on a machine that already
+works. Releases are published by `./bin/release` in the vaulty repo.
+
 ## API keys
 
 **All keys go in one file: `~/.config/secrets.env`.** Nothing else needs editing.
+
+On a machine that already has vaulty, `vaulty secrets pull` writes this file for you from the
+encrypted vault instead of typing the keys in by hand. It merges rather than overwrites, so
+anything you added here yourself survives.
 
 ```sh
 mkdir -p ~/.config && chmod 700 ~/.config
