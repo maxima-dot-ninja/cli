@@ -729,6 +729,7 @@ dependencies = [
  "serde_json",
  "toml",
  "uuid",
+ "vaultykeys",
 ]
 
 [[package]]
@@ -1493,6 +1494,13 @@ dependencies = [
  "getrandom 0.4.3",
  "js-sys",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "vaultykeys"
+version = "1.0.0"
+dependencies = [
+ "dirs",
 ]
 
 [[package]]

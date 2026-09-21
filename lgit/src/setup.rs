@@ -114,7 +114,7 @@ pub fn run_setup() -> Result<()> {
     // Step 3: Get API key if needed
     let api_key = if provider.needs_key {
         // Check environment variable first
-        if let Ok(key) = std::env::var(provider.env_var) {
+        if let Some(key) = vaultykeys::get_for("lgit", provider.env_var) {
             println!(
                 "  {} Found {} in environment",
                 style("✓").green(),
@@ -223,7 +223,7 @@ pub fn change_model() -> Result<()> {
     // Step 3: Handle API key if switching to a new provider that needs one
     if switching_provider && provider.needs_key {
         // Check environment variable first
-        let has_env_key = std::env::var(provider.env_var).is_ok();
+        let has_env_key = vaultykeys::has(provider.env_var);
 
         if has_env_key {
             println!(
@@ -274,7 +274,7 @@ pub fn manage_api_key() -> Result<()> {
 
     // Show current status for each provider
     for provider in PROVIDERS.iter().filter(|p| p.needs_key) {
-        let env_status = std::env::var(provider.env_var).is_ok();
+        let env_status = vaultykeys::has(provider.env_var);
         let config_status = provider.name == config.provider.name && !config.provider.api_key.is_empty();
 
         let status = if env_status {
@@ -307,7 +307,7 @@ pub fn manage_api_key() -> Result<()> {
     let provider = key_providers[provider_idx];
 
     // Check if env var is set
-    if std::env::var(provider.env_var).is_ok() {
+    if vaultykeys::has(provider.env_var) {
         println!();
         println!(
             "{} {} is set via environment variable.",

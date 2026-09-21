@@ -6,6 +6,7 @@ description = "Blazing fast TUI for managing Google Workspace services"
 
 [dependencies]
 # Async runtime
+vaultykeys = { path = "../vaultykeys" }
 tokio = { version = "1", features = ["full"] }
 
 # HTTP

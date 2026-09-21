@@ -150,38 +150,14 @@ impl Config {
         Ok(Self::config_dir()?.join("config.toml"))
     }
 
-    /// The restored vault file: `~/.config/secrets.env`, written by `vaulty secrets pull`.
-    /// Overridable so a machine that keeps its environment somewhere else still restores — and so
-    /// this path can be exercised without writing to the owner's real credentials file.
-    fn secrets_env() -> Option<PathBuf> {
-        if let Ok(path) = std::env::var("VGOOG_SECRETS_ENV") {
-            return Some(PathBuf::from(path));
-        }
-        Some(dirs::home_dir()?.join(".config").join("secrets.env"))
-    }
-
     /// Rebuild a config from the vault when this machine has none of its own.
     ///
-    /// vgoog owns its credentials; the api only keeps an encrypted backup. This is the path that
-    /// makes the backup worth having — on a fresh machine, or after the config was blown away,
-    /// `vaulty secrets pull` followed by any vgoog command is the whole recovery.
+    /// vgoog owns its credentials; this is the path that makes a fresh machine work without any
+    /// interaction. Secrets live in `~/.vaulty/.secrets/` now — nothing sources them into a
+    /// shell, so they are READ rather than inherited from the environment. `vaultykeys` owns the
+    /// resolution order; `VGOOG_SECRETS_DIR` is gone in favour of its `VAULTY_SECRETS_DIR`.
     fn from_secrets_env() -> Option<Self> {
-        let body = std::fs::read_to_string(Self::secrets_env()?).ok()?;
-
-        let mut values: BTreeMap<String, String> = BTreeMap::new();
-        for line in body.lines() {
-            let line = line.trim();
-            if line.starts_with('#') || line.is_empty() {
-                continue;
-            }
-            // The file is sourced by the shell, so entries read `export NAME=value`.
-            let line = line.strip_prefix("export ").unwrap_or(line).trim_start();
-            let Some((name, value)) = line.split_once('=') else { continue };
-            let value = value.trim().trim_matches('"').trim_matches('\'');
-            values.insert(name.trim().to_string(), value.to_string());
-        }
-
-        let take = |key: &str| values.get(key).filter(|value| !value.is_empty()).cloned();
+        let take = |key: &str| vaultykeys::get_for("vgoog", key).filter(|value| !value.is_empty());
 
         // A delegated key beats an OAuth token when both are present: it cannot be revoked by a
         // password change, it needs no browser, and it reaches more. One key, one account per
@@ -284,7 +260,7 @@ impl Config {
                 return Ok(restored);
             }
             return Err(VgoogError::Config(
-                "Config not found. Run `vgoog` to set up, or `vaulty secrets pull` to restore from the vault.".into(),
+                "Config not found. Run `vgoog` to set up, or add its keys with `vaulty secrets set vgoog …`.".into(),
             ));
         }
         let content = std::fs::read_to_string(&path)?;

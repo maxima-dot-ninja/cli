@@ -64,7 +64,7 @@ fn resolve_key(ai: &AiConfig) -> String {
         "gemini" => "GOOGLE_API_KEY",
         _ => return String::new(),
     };
-    std::env::var(var).unwrap_or_default()
+    vaultykeys::get_or_empty(var)
 }
 
 pub async fn dispatch(ai: &AiConfig, system: &str, prompt: &str) -> Result<String> {

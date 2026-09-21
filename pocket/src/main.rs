@@ -15,7 +15,7 @@ use std::path::PathBuf;
 /// and any agent reading these files need a path that does not depend on where
 /// pocket ran.
 pub fn export_root() -> PathBuf {
-    match std::env::var("POCKET_EXPORT_DIR") {
+    match vaultykeys::get("POCKET_EXPORT_DIR").ok_or(()) {
         Ok(dir) if !dir.is_empty() => PathBuf::from(dir),
         _ => dirs::home_dir().unwrap_or_default().join("dev").join("pocket-exports"),
     }

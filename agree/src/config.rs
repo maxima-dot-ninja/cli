@@ -60,7 +60,7 @@ pub fn load() -> Result<Config> {
     };
 
     // Environment wins, so a key exported in the shell overrides the file.
-    if let Ok(key) = std::env::var("AGREE_API_KEY") {
+    if let Some(key) = vaultykeys::get_for("agree", "AGREE_API_KEY") {
         config.api_key = key;
     }
     Ok(config)
@@ -92,7 +92,7 @@ pub fn missing_key_help() -> String {
     format!(
         "No API key found.\n\n\
          Set one of these:\n  \
-         export AGREE_API_KEY=\"...\"        (recommended, in ~/.config/secrets.env)\n  \
+         vaulty secrets set agree AGREE_API_KEY ...   (recommended)\n  \
          agree setup                        (writes {path})"
     )
 }

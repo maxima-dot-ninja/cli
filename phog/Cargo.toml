@@ -6,6 +6,7 @@ description = "CLI for PostHog — HogQL from the terminal, people and events by
 
 [dependencies]
 anyhow = "1"
+vaultykeys = { path = "../vaultykeys" }
 clap = { version = "4", features = ["derive"] }
 console = "0.15"
 dialoguer = { version = "0.11", features = ["fuzzy-select"] }

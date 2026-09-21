@@ -102,25 +102,27 @@ pub fn load() -> Result<Config> {
         config.key_source = Source::File;
     }
 
-    // The environment wins, so a key exported in the shell beats the file.
+    // The vault wins over this tool's own config file, and an exported variable wins over both.
+    // Resolution lives in `vaultykeys` — nothing sources secrets into the shell any more, so a
+    // key has to be READ rather than inherited.
     for (variable, field) in [
         ("MERCURY_API_KEY", &mut config.api_key),
         ("MERCURY_READ_KEY", &mut config.read_key),
         ("MERCURY_CLIENT_ID", &mut config.client_id),
         ("MERCURY_CLIENT_SECRET", &mut config.client_secret),
     ] {
-        if let Ok(value) = std::env::var(variable) {
+        if let Some(value) = vaultykeys::get_for("merc", variable) {
             if !value.is_empty() {
                 *field = value;
             }
         }
     }
     config.read_key = config.read_key.trim().to_string();
-    if std::env::var("MERCURY_API_KEY").is_ok_and(|value| !value.trim().is_empty()) {
+    if vaultykeys::get_for("merc", "MERCURY_API_KEY").is_some_and(|value| !value.trim().is_empty()) {
         config.api_key = config.api_key.trim().to_string();
         config.key_source = Source::Environment;
     }
-    if std::env::var("MERCURY_SANDBOX").is_ok_and(|v| v == "1" || v == "true") {
+    if vaultykeys::get("MERCURY_SANDBOX").is_some_and(|v| v == "1" || v == "true") {
         config.sandbox = true;
     }
     Ok(config)
@@ -169,7 +171,7 @@ pub fn token_advice(config: &Config) -> String {
     if config.key_source == Source::Environment {
         lines.push(
             "If you edited the file it came from, this shell still holds the old value — \
-             open a new terminal, or `source ~/.config/secrets.env`."
+             run `vaulty secrets set merc MERCURY_READ_KEY <token>`."
                 .into(),
         );
     }
@@ -214,7 +216,7 @@ pub fn ip_advice(ip: &str, mutates: bool, has_read_key: bool) -> String {
     lines.push(String::new());
     lines.push("Or stop needing one. This was a read, and a `Read Only` token has no allow-list".into());
     lines.push("at all — it works from any network. Create one alongside the token you have:".into());
-    lines.push("  export MERCURY_READ_KEY=\"secret-token:...\"   (in ~/.config/secrets.env)".into());
+    lines.push("  vaulty secrets set merc MERCURY_READ_KEY secret-token:...".into());
     lines.push("merc then reads on that token and keeps the current one for moving money.".into());
     lines.join("\n")
 }
@@ -224,7 +226,7 @@ pub fn missing_key_help() -> String {
     format!(
         "No API token found.\n\n\
          Create one at https://mercury.com → Settings → API Tokens, then:\n  \
-         export MERCURY_API_KEY=\"secret-token:...\"   (in ~/.config/secrets.env)\n\n\
+         vaulty secrets set merc MERCURY_API_KEY secret-token:...\n\n\
          Or put it in {path}:\n  \
          api_key = \"secret-token:...\""
     )

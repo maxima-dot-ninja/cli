@@ -6,6 +6,7 @@ description = "CLI for Pocket AI — export recorded conversations and search th
 
 [dependencies]
 anyhow = "1"
+vaultykeys = { path = "../vaultykeys" }
 console = "0.15"
 dirs = "5"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }

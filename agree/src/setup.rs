@@ -139,7 +139,7 @@ fn choose_ollama_model() -> Result<String> {
 /// An existing environment variable is the better home for a key, so offer to
 /// keep using it rather than writing a second copy into the config file.
 fn ask_for_key(provider: &Provider, config: &Config) -> Result<String> {
-    let from_env = std::env::var(provider.env_var).unwrap_or_default();
+    let from_env = vaultykeys::get_or_empty(provider.env_var);
 
     if !from_env.is_empty() {
         println!(
@@ -158,7 +158,7 @@ fn ask_for_key(provider: &Provider, config: &Config) -> Result<String> {
     println!(
         "  {}",
         style(format!(
-            "Tip: export {} in ~/.config/secrets.env instead, and leave this blank.",
+            "Tip: run `vaulty secrets set agree {}` instead, and leave this blank.",
             provider.env_var
         ))
         .dim()

@@ -646,7 +646,7 @@ async fn run_cli(command: cli::CliCommand) -> anyhow::Result<()> {
                 }
                 (None, None) => {
                     // Falling back to the environment is what makes this usable straight after
-                    // `vaulty secrets pull` — the credentials are already exported there.
+                    // ~/.vaulty/.secrets/vgoog.env — the credentials are already there.
                     let client_id = client_id
                         .or_else(|| std::env::var("VGOOG_CLIENT_ID").ok())
                         .ok_or_else(|| anyhow::anyhow!("--client-id, or VGOOG_CLIENT_ID in the environment"))?;

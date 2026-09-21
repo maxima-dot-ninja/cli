@@ -8,7 +8,7 @@ const BASE_URL: &str = "https://public.heypocketai.com/api/v1";
 /// POCKET_APP_KEY is used exactly as set. The key file is trimmed, so a file
 /// written by `pbpaste` works as-is.
 pub fn app_key() -> String {
-    match std::env::var("POCKET_APP_KEY") {
+    match vaultykeys::get_for("pocket", "POCKET_APP_KEY").ok_or(()) {
         Ok(key) if !key.is_empty() => key,
         _ => {
             let file = dirs::home_dir().unwrap_or_default().join(".config").join("pocket").join("key");

@@ -1,0 +1,8 @@
+[package]
+name = "vaultykeys"
+version = "1.0.0"
+edition = "2021"
+description = "Where this machine's secrets live: ~/.vaulty/.secrets/. The one place the resolution order exists."
+
+[dependencies]
+dirs = "5"

@@ -46,17 +46,17 @@ pub fn load() -> Result<Config> {
     };
 
     // Environment wins, so a key exported in the shell overrides the file.
-    if let Ok(key) = std::env::var("POSTHOG_PERSONAL_API_KEY") {
+    if let Some(key) = vaultykeys::get_for("phog", "POSTHOG_PERSONAL_API_KEY") {
         if !key.is_empty() {
             config.api_key = key;
         }
     }
-    if let Ok(project) = std::env::var("POSTHOG_PROJECT_ID") {
+    if let Some(project) = vaultykeys::get_for("phog", "POSTHOG_PROJECT_ID") {
         if !project.is_empty() {
             config.project_id = project;
         }
     }
-    if let Ok(host) = std::env::var("POSTHOG_APP_HOST") {
+    if let Some(host) = vaultykeys::get_for("phog", "POSTHOG_APP_HOST") {
         if !host.is_empty() {
             config.host = host;
         }
@@ -93,7 +93,7 @@ pub fn missing_help() -> String {
     let path = config_path().map(|p| p.display().to_string()).unwrap_or_default();
     format!(
         "PostHog is not configured.\n\n\
-         Set these (in ~/.config/secrets.env, recommended):\n  \
+         Set these with `vaulty secrets set phog <NAME> <value>`:\n  \
          export POSTHOG_PERSONAL_API_KEY=\"phx_...\"   PostHog → Settings → Personal API keys\n  \
          export POSTHOG_PROJECT_ID=\"12345\"           the number in the project's URL\n  \
          export POSTHOG_APP_HOST=\"{DEFAULT_HOST}\"    or eu.posthog.com\n\n\
