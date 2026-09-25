@@ -47,11 +47,18 @@ insights:
     layout: {x: 6, y: 0, w: 3, h: 3}
 
   - key: emails
-    name: Left an email
+    name: Left an email or went to support
     type: number
     series:
       - event: astronaut_contact_submitted
         math: unique_session
+        name: Shortlist email
+      - event: astronaut_support_requested
+        math: unique_session
+        name: Support thread
+      - event: astronaut_cta_clicked
+        math: unique_session
+        name: Rail button
     layout: {x: 9, y: 0, w: 3, h: 3}
 
   - key: funnel
