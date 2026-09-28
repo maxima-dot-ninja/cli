@@ -43,7 +43,7 @@ pub async fn execute_detail(app: &mut App) {
         let result = match service {
             Service::Gmail => {
                 let api = GmailApi::new(&app.client);
-                api.get_message(&item.id, "full").await
+                api.get_message(&item.id, "full", &[]).await
             }
             Service::Calendar => {
                 let cal_id = item.metadata.get("calendarId")
@@ -547,7 +547,7 @@ async fn handle_calendar(app: &mut App, action: usize) -> crate::error::Result<(
             } else {
                 (now + chrono::Duration::days(7)).format("%Y-%m-%dT23:59:59Z").to_string()
             };
-            let val = api.list_events("primary", Some(&time_min), Some(&time_max), None, 50, None, true, Some("startTime")).await?;
+            let val = api.list_events("primary", Some(&time_min), Some(&time_max), None, 50, None, true, Some("startTime"), None).await?;
             parse_calendar_events(app, &val);
             app.service = Some(Service::Calendar);
             app.screen = Screen::ActionView;
@@ -556,7 +556,7 @@ async fn handle_calendar(app: &mut App, action: usize) -> crate::error::Result<(
         }
         2 => {
             // All events
-            let val = api.list_events("primary", None, None, None, 50, None, true, Some("startTime")).await?;
+            let val = api.list_events("primary", None, None, None, 50, None, true, Some("startTime"), None).await?;
             parse_calendar_events(app, &val);
             app.service = Some(Service::Calendar);
             app.screen = Screen::ActionView;

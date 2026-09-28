@@ -38,6 +38,10 @@ const ALIASES: &[(&str, &str)] = &[
     ("q", "query"),
     ("user_id", "id"),
     ("label_ids", "labels"),
+    // Google's client libraries call the payload `body` or `requestBody`; ours is `event`. Sent as
+    // `body`, an accept went out empty and the invite stayed unanswered.
+    ("body", "event"),
+    ("request_body", "event"),
 ];
 
 /// Accept an argument object however it was spelled.

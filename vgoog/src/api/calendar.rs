@@ -91,11 +91,17 @@ impl<'a> CalendarApi<'a> {
         page_token: Option<&str>,
         single_events: bool,
         order_by: Option<&str>,
+        fields: Option<&str>,
     ) -> Result<Value> {
         let cal = urlencoding::encode(calendar_id);
         let mut url = format!(
             "{BASE}/calendars/{cal}/events?maxResults={max_results}&singleEvents={single_events}"
         );
+        // Google's partial response. A full event is over a kilobyte, so a month of them overflows
+        // what an agent is shown of a tool's output; asking for the few fields it needs does not.
+        if let Some(f) = fields {
+            url.push_str(&format!("&fields={}", urlencoding::encode(f)));
+        }
         if let Some(t) = time_min {
             url.push_str(&format!("&timeMin={}", urlencoding::encode(t)));
         }

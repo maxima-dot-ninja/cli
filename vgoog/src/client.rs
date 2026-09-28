@@ -7,6 +7,19 @@ use serde_json::Value;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
+/// Tries at a rate-limited call, waiting 1, 2, 4, 8 then 16 s between them — about half a minute,
+/// inside the 2 minutes an agent's `google` call is given.
+const RATE_ATTEMPTS: u32 = 6;
+
+/// A limit that clears in seconds. `userRateLimitExceeded` is spelled with a capital R.
+fn rate_limited(result: &Result<Value>) -> bool {
+    match result {
+        Err(VgoogError::RateLimited { .. }) => true,
+        Err(VgoogError::Api { status: 403, message }) => message.contains("rateLimitExceeded") || message.contains("RateLimitExceeded"),
+        _ => false,
+    }
+}
+
 pub struct GoogleClient {
     http: Client,
     /// The account this client acts as — not necessarily the active one. `--account` builds a
@@ -145,19 +158,32 @@ impl GoogleClient {
         }
     }
 
+    /// Google's short-term limits are waited out and the call made again: a 429, or a 403 whose
+    /// reason is `rateLimitExceeded`. Accepting a run of calendar invites hit one on the second
+    /// call, and the agent gave up with fifteen left. A daily quota (`quotaExceeded`) is not
+    /// retried — seconds will not fix it.
     pub async fn request(
         &self,
         method: Method,
         url: &str,
         body: Option<&Value>,
     ) -> Result<Value> {
-        let token = self.authorize(url).await?;
-        let mut req = self.http.request(method, url).bearer_auth(&token);
-        if let Some(b) = body {
-            req = req.json(b);
+        let mut wait = std::time::Duration::from_secs(1);
+        let mut attempt = 1;
+        loop {
+            let token = self.authorize(url).await?;
+            let mut req = self.http.request(method.clone(), url).bearer_auth(&token);
+            if let Some(b) = body {
+                req = req.json(b);
+            }
+            let result = self.handle_response(req.send().await?).await;
+            if attempt >= RATE_ATTEMPTS || !rate_limited(&result) {
+                return result;
+            }
+            tokio::time::sleep(wait).await;
+            wait *= 2;
+            attempt += 1;
         }
-        let resp = req.send().await?;
-        self.handle_response(resp).await
     }
 
     pub async fn get(&self, url: &str) -> Result<Value> {

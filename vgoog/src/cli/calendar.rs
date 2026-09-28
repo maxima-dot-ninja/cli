@@ -19,6 +19,18 @@ fn b(args: &Value, key: &str, default: bool) -> bool {
     args.get(key).and_then(|v| v.as_bool()).unwrap_or(default)
 }
 
+/// The fields to write, for `create_event` and `update_event`. Missing, they went to Google as a
+/// `null` body: the update changed nothing and still came back with the event, so an agent
+/// accepting an invite reported success while the invite stayed unanswered.
+fn event_body<'a>(args: &'a Value, action: &str) -> Result<&'a Value> {
+    match args.get("event") {
+        Some(event) if event.is_object() => Ok(event),
+        _ => Err(VgoogError::Other(format!(
+            "{action} needs `event`: an object of the fields to write, e.g. {{\"attendees\": [{{\"email\": \"...\", \"responseStatus\": \"accepted\"}}]}}"
+        ))),
+    }
+}
+
 pub async fn execute(client: &GoogleClient, action: &str, args: Value) -> Result<Value> {
     let api = CalendarApi::new(client);
     match action {
@@ -36,11 +48,11 @@ pub async fn execute(client: &GoogleClient, action: &str, args: Value) -> Result
             so(&args, "calendar_id").unwrap_or("primary"),
             so(&args, "time_min"), so(&args, "time_max"), so(&args, "query"),
             u(&args, "max_results", 20), so(&args, "page_token"),
-            b(&args, "single_events", false), so(&args, "order_by"),
+            b(&args, "single_events", false), so(&args, "order_by"), so(&args, "fields"),
         ).await,
         "get_event" => api.get_event(s(&args, "calendar_id"), s(&args, "event_id")).await,
-        "create_event" => api.create_event(so(&args, "calendar_id").unwrap_or("primary"), &args["event"]).await,
-        "update_event" => api.update_event(s(&args, "calendar_id"), s(&args, "event_id"), &args["event"]).await,
+        "create_event" => api.create_event(so(&args, "calendar_id").unwrap_or("primary"), event_body(&args, action)?).await,
+        "update_event" => api.update_event(s(&args, "calendar_id"), s(&args, "event_id"), event_body(&args, action)?).await,
         "delete_event" => api.delete_event(s(&args, "calendar_id"), s(&args, "event_id")).await,
         "move_event" => api.move_event(s(&args, "calendar_id"), s(&args, "event_id"), s(&args, "destination")).await,
         "quick_add_event" => api.quick_add_event(so(&args, "calendar_id").unwrap_or("primary"), s(&args, "text")).await,

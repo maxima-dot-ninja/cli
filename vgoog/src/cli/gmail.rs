@@ -15,6 +15,15 @@ fn u32_field(args: &Value, key: &str, default: u32) -> u32 {
     args.get(key).and_then(|v| v.as_u64()).map(|v| v as u32).unwrap_or(default)
 }
 
+/// A list of names, given either as an array or as one comma-separated string — Google documents the
+/// array, and agents write "From,Subject,Date".
+fn names(args: &Value, key: &str) -> Vec<String> {
+    match args.get(key) {
+        Some(Value::String(joined)) => joined.split(',').map(str::trim).filter(|n| !n.is_empty()).map(String::from).collect(),
+        _ => str_array(args, key),
+    }
+}
+
 fn str_array(args: &Value, key: &str) -> Vec<String> {
     args.get(key)
         .and_then(|v| v.as_array())
@@ -50,7 +59,7 @@ pub async fn execute(client: &GoogleClient, action: &str, args: Value) -> Result
         "list_messages" => {
             api.list_messages(str_opt(&args, "query"), None, u32_field(&args, "max_results", 20), str_opt(&args, "page_token")).await
         }
-        "get_message" => api.get_message(str_field(&args, "id"), str_opt(&args, "format").unwrap_or("full")).await,
+        "get_message" => api.get_message(str_field(&args, "id"), str_opt(&args, "format").unwrap_or("full"), &names(&args, "metadata_headers")).await,
         "send_message" => api.send_message(&raw_message(&args)?).await,
         "trash_message" => api.trash_message(str_field(&args, "id")).await,
         "untrash_message" => api.untrash_message(str_field(&args, "id")).await,

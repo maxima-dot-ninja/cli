@@ -37,8 +37,14 @@ impl<'a> GmailApi<'a> {
         self.client.get(&url).await
     }
 
-    pub async fn get_message(&self, id: &str, format: &str) -> Result<Value> {
-        let url = format!("{BASE}/messages/{id}?format={format}");
+    /// `metadata_headers` narrows `format=metadata` to the headers named. Without it a message comes
+    /// back with every Received/ARC/DKIM line first, and an agent shown only the start of a tool's
+    /// output never reaches the Subject.
+    pub async fn get_message(&self, id: &str, format: &str, metadata_headers: &[String]) -> Result<Value> {
+        let mut url = format!("{BASE}/messages/{id}?format={format}");
+        for header in metadata_headers {
+            url.push_str(&format!("&metadataHeaders={}", urlencoding::encode(header)));
+        }
         self.client.get(&url).await
     }
 
