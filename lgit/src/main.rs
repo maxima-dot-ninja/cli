@@ -40,10 +40,14 @@ struct Cli {
     #[arg(long, value_name = "VERSION")]
     tag: Option<String>,
 
-    /// Treat the current directory as a folder of repos: stage everything in
-    /// each one, generate all commit messages in parallel, then review them
-    /// one by one as they arrive
-    #[arg(long)]
+    /// Treat the current directory as a folder of repos rather than one repo.
+    /// On its own: stage everything in each, generate all commit messages in
+    /// parallel, then review them one by one as they arrive. With `status`:
+    /// explain every repo in the folder.
+    ///
+    /// Global so it can be written after the subcommand too — `lgit status
+    /// --root` is how anyone would reach for it.
+    #[arg(long, global = true)]
     root: bool,
 
     #[command(subcommand)]
@@ -91,7 +95,10 @@ async fn main() -> Result<()> {
     }
 
     if let Some(Command::Status) = cli.command {
-        return status::run().await;
+        return match cli.root {
+            true => status::run_root().await,
+            false => status::run().await,
+        };
     }
 
     if cli.root {
@@ -279,7 +286,7 @@ async fn run_root_flow(tag: Option<String>) -> Result<()> {
 
 /// Direct children of `root` that are git repositories, sorted by name.
 /// A `.git` file (not a directory) is a worktree, which counts too.
-fn child_repos(root: &Path) -> Result<Vec<PathBuf>> {
+pub(crate) fn child_repos(root: &Path) -> Result<Vec<PathBuf>> {
     let mut repos: Vec<PathBuf> = std::fs::read_dir(root)
         .with_context(|| format!("Could not list {}", root.display()))?
         .filter_map(|entry| entry.ok().map(|e| e.path()))
@@ -289,7 +296,7 @@ fn child_repos(root: &Path) -> Result<Vec<PathBuf>> {
     Ok(repos)
 }
 
-fn repo_name(path: &Path) -> String {
+pub(crate) fn repo_name(path: &Path) -> String {
     path.file_name()
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_else(|| path.display().to_string())

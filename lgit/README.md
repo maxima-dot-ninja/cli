@@ -168,6 +168,13 @@ It looks **one level down** only, so neither the folder itself nor repos nested 
 are included, while a worktree (a folder with a `.git` file) counts. Adding `--tag`
 tags every repo that gets committed.
 
+`--root` works with `status` too: `lgit status --root` explains every repo in the
+folder, using the same one-level-down rule so the two commands never disagree about
+which repos a folder holds. Reading each repo is quick and happens up front; the model
+calls all go out together, and each repo prints as its answer arrives. Repos with
+nothing going on are named on one line instead of getting a section each, and a repo
+whose explanation fails still shows its branch and file counts.
+
 ### What's going on here?
 
 `lgit status` is `git status` written for a person. It reads the branch and its
@@ -214,6 +221,7 @@ so on) are listed by name only. Their contents are never sent to the model.
 ```bash
 lgit                  # Run the commit flow
 lgit status           # Explain what's going on in this repo, in plain English
+lgit status --root    # Explain every repo in this folder
 lgit --tag v1.0.0     # Commit, then tag it
 lgit --root           # Commit every repo in this folder, one after another
 lgit --setup          # Re-run setup wizard

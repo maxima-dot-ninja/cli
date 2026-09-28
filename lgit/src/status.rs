@@ -8,6 +8,7 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, SystemTime};
+use tokio::sync::mpsc;
 
 /// The staged and unstaged diffs get separate budgets, so a large unstaged
 /// refactor can't push the staged change out of the model's view.
@@ -73,6 +74,105 @@ pub async fn run() -> Result<()> {
     spinner.finish_and_clear();
 
     ui::print_status_report(&report?);
+    Ok(())
+}
+
+/// `lgit status --root`: explain every repo one level below the current
+/// directory. "Qualifies" means exactly what it means for `lgit --root` — the
+/// same `child_repos` walk — so the two commands never disagree about which
+/// repos a folder holds.
+///
+/// Reading each repo is git-only and quick, so that part is sequential. The
+/// model call is the slow half, so those go out together and each repo prints
+/// as its answer lands, the way the commit flow does.
+pub async fn run_root() -> Result<()> {
+    let cfg = config::load_config()?;
+    let root = std::env::current_dir().context("Could not read the current directory")?;
+
+    let repos = crate::child_repos(&root)?;
+    if repos.is_empty() {
+        // Standing inside a repo instead of above a folder of them is the easy
+        // mistake, and "none found" on its own reads like something is broken.
+        let inside = Repository::discover(&root).is_ok();
+        ui::print_warning(&match inside {
+            true => format!(
+                "No repositories one level below {}, though this directory is itself a repo — drop --root to describe it.",
+                root.display()
+            ),
+            false => format!("No git repositories found in {}", root.display()),
+        });
+        return Ok(());
+    }
+
+    // A repo that will not open is reported and skipped: one broken checkout
+    // must not hide the rest of the folder.
+    let mut quiet: Vec<String> = Vec::new();
+    let mut jobs: Vec<(String, Snapshot)> = Vec::new();
+    for path in &repos {
+        // Labelled by the folder you see in `ls`, not by the repo's own workdir
+        // name. They differ for a symlinked repo, and `lgit --root` labels by the
+        // directory entry — the two commands must not name the same repo
+        // differently.
+        let label = crate::repo_name(path);
+        match Snapshot::read_at(path) {
+            Ok(snapshot) if snapshot.is_quiet() => quiet.push(label),
+            Ok(snapshot) => jobs.push((label, snapshot)),
+            Err(e) => ui::print_warning(&format!("{label}: {e}")),
+        }
+    }
+
+    if !quiet.is_empty() {
+        ui::print_info(&format!("Nothing going on in: {}", quiet.join(", ")));
+    }
+    if jobs.is_empty() {
+        return Ok(());
+    }
+    ui::print_info(&format!(
+        "Asking {} about {} repo(s) in parallel...",
+        cfg.provider.model,
+        jobs.len()
+    ));
+
+    // Held out here so a repo whose explanation fails still gets its facts
+    // printed — the branch and counts are the half that never needed a model.
+    let headers: Vec<(String, Vec<String>)> = jobs
+        .iter()
+        .map(|(label, s)| (label.clone(), vec![s.branch_line(), s.counts_line()]))
+        .collect();
+
+    let (tx, mut rx) = mpsc::unbounded_channel::<(usize, Result<String>)>();
+    for (idx, (_, snapshot)) in jobs.into_iter().enumerate() {
+        let tx = tx.clone();
+        let cfg = cfg.clone();
+        tokio::spawn(async move {
+            // facts() reads diffs and untracked files, which on a big repo is
+            // the slow half — so it belongs in the task, not in the loop above.
+            let facts = snapshot.facts();
+            let _ = tx.send((idx, ai::explain_status(&cfg, &facts).await));
+        });
+    }
+    drop(tx);
+
+    let total = headers.len();
+    let mut done = 0;
+    while done < total {
+        let spinner = ui::create_spinner(&format!(
+            "Waiting for the next explanation ({} of {} left)...",
+            total - done,
+            total
+        ));
+        let next = rx.recv().await;
+        spinner.finish_and_clear();
+        let Some((idx, result)) = next else { break };
+        done += 1;
+
+        let (name, lines) = &headers[idx];
+        ui::print_status_header(&format!("{name} ({done}/{total})"), lines);
+        match result {
+            Ok(report) => ui::print_status_report(&report),
+            Err(e) => ui::print_warning(&format!("Could not explain this one: {e}")),
+        }
+    }
     Ok(())
 }
 
@@ -143,7 +243,20 @@ struct Snapshot {
 
 impl Snapshot {
     fn read() -> Result<Self> {
-        let repo = Repository::open_from_env().context("Not a git repository")?;
+        Self::from_repo(Repository::open_from_env().context("Not a git repository")?)
+    }
+
+    /// The same read for a repo at a known path, leaving the process's current
+    /// directory alone. `--root` reads several repos and then explains them in
+    /// parallel, so chdir'ing between them would have the tasks racing over one
+    /// piece of global state.
+    fn read_at(dir: &Path) -> Result<Self> {
+        let repo = Repository::discover(dir)
+            .with_context(|| format!("{} is not a git repository", dir.display()))?;
+        Self::from_repo(repo)
+    }
+
+    fn from_repo(repo: Repository) -> Result<Self> {
         let root = repo
             .workdir()
             .context("This is a bare repository, so there is no working tree to describe")?
