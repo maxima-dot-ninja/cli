@@ -1,14 +1,14 @@
 # ccx
 
-**ccx is how you start Claude Code every day.** It runs `claude` with permissions bypassed and
-remote control on, it names each session after the folder it runs in, and by default it picks up
+**ccx is how you start Claude Code every day.** It runs `claude` on Opus 5.5 at xhigh effort, in auto permission mode, with
+remote control on. It names each session after the folder it runs in, and by default it picks up
 the last session of that folder that is no longer running. A few subcommands list, summarize and
 delete past sessions. ccx is one bash script, and it lives in the [_cli](../README.md) repo.
 
 ```sh
 ccx                          # resume this folder's last ended session, or start a new one
 ccx new                      # always start a new session
-ccx --model opus             # any claude flag passes straight through
+ccx --model sonnet           # any claude flag passes straight through, and yours win
 ccx new --name spike         # a new session under your own name, with no numbering
 ccx details                  # every session of this folder, each with a one-sentence summary
 ccx delete croissant-api-002 # delete a session by its name, from any folder
@@ -51,16 +51,19 @@ it. It runs one of these three command lines, and your own arguments always go a
 
 ```sh
 # resuming an ended session
-claude --dangerously-skip-permissions --remote-control NAME --name NAME --resume SESSION_ID [your args]
+claude --model claude-opus-5-5 --effort xhigh --permission-mode auto --remote-control NAME --name NAME --resume SESSION_ID [your args]
 
 # starting a new session
-claude --dangerously-skip-permissions --remote-control NAME --name NAME [your args]
+claude --model claude-opus-5-5 --effort xhigh --permission-mode auto --remote-control NAME --name NAME [your args]
 
 # starting a new session when you passed -n, --name or --name=...
-claude --dangerously-skip-permissions --remote-control [your args]
+claude --model claude-opus-5-5 --effort xhigh --permission-mode auto --remote-control [your args]
 ```
 
-`--dangerously-skip-permissions` turns off every permission prompt. `--remote-control NAME` opens
+`--model claude-opus-5-5 --effort xhigh` pins the model and the effort level. Because your
+arguments come last, passing your own `--model` or `--effort` overrides them.
+`--permission-mode auto` lets a classifier approve safe actions on its own and stop to ask before
+risky ones, instead of skipping every check. `--remote-control NAME` opens
 the session to Remote Control under the same name that `--name` puts in the prompt box, the
 `/resume` picker and the terminal title.
 

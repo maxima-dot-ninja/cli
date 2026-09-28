@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# ccx — claude with permissions bypassed + remote control on.
+# ccx — claude on Opus 5.5 at xhigh effort, in auto permission mode, with
+# remote control on.
 #
 # Names the session after the last two path components plus a counter, so
 # dev/_www/croissant/api becomes croissant-api-000, and the next session in the
@@ -24,6 +25,10 @@
 SESSIONS="$HOME/.claude/sessions"
 PROJECTS="$HOME/.claude/projects"
 SUMMARIES="$HOME/.config/ccx/summaries"
+
+# Every launch starts with these. The caller's args go last, so a --model or
+# --effort passed to ccx wins over the defaults here.
+CLAUDE=(claude --model claude-opus-5-5 --effort xhigh --permission-mode auto --remote-control)
 
 slug() {
   printf '%s' "$1" |
@@ -296,7 +301,7 @@ resume_last() {
   [ -n "$id" ] || return
   name=$(title_of "$(project_dir "$(pwd -P)")/$id.jsonl")
   name=${name:-$(pick_name "$(base_name)" "$(taken_names)")}
-  exec claude --dangerously-skip-permissions --remote-control "$name" --name "$name" --resume "$id" "$@"
+  exec "${CLAUDE[@]}" "$name" --name "$name" --resume "$id" "$@"
 }
 
 has_name() {
@@ -310,9 +315,9 @@ has_name() {
 # A --name from the caller wins over the generated one.
 start_new() {
   local name
-  has_name "$@" && exec claude --dangerously-skip-permissions --remote-control "$@"
+  has_name "$@" && exec "${CLAUDE[@]}" "$@"
   name=$(pick_name "$(base_name)" "$(taken_names)")
-  exec claude --dangerously-skip-permissions --remote-control "$name" --name "$name" "$@"
+  exec "${CLAUDE[@]}" "$name" --name "$name" "$@"
 }
 
 # The usage block lives in the header comment above, so the docs and the help
