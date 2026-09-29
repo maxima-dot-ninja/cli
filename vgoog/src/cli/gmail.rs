@@ -11,6 +11,19 @@ fn str_opt<'a>(args: &'a Value, key: &str) -> Option<&'a str> {
     args.get(key).and_then(|v| v.as_str())
 }
 
+/// The id, by whichever name the caller used. An empty one used to reach Gmail as
+/// `/messages/?format=full`, which is the LIST endpoint: asked for one message, it answered with the
+/// inbox, and the agent reported that the tool "returns lists instead of bodies".
+fn id_of<'a>(args: &'a Value, action: &str, names: &[&str]) -> Result<&'a str> {
+    names
+        .iter()
+        .find_map(|name| str_opt(args, name).filter(|id| !id.trim().is_empty()))
+        .ok_or_else(|| VgoogError::Other(format!("{action} needs `id` — the id list_messages / list_threads gave you")))
+}
+
+const MESSAGE_ID: [&str; 3] = ["id", "message_id", "messageId"];
+const THREAD_ID: [&str; 3] = ["id", "thread_id", "threadId"];
+
 fn u32_field(args: &Value, key: &str, default: u32) -> u32 {
     args.get(key).and_then(|v| v.as_u64()).map(|v| v as u32).unwrap_or(default)
 }
@@ -59,7 +72,16 @@ pub async fn execute(client: &GoogleClient, action: &str, args: Value) -> Result
         "list_messages" => {
             api.list_messages(str_opt(&args, "query"), None, u32_field(&args, "max_results", 20), str_opt(&args, "page_token")).await
         }
-        "get_message" => api.get_message(str_field(&args, "id"), str_opt(&args, "format").unwrap_or("full"), &names(&args, "metadata_headers")).await,
+        // Readable unless one of Gmail's other shapes is asked for by name: headers, decoded text,
+        // attachments. "full" is readable too — agents pass it meaning "everything", and got 44 KB
+        // of base64 they then paid another model to decode.
+        "get_message" => {
+            let id = id_of(&args, action, &MESSAGE_ID)?;
+            match str_opt(&args, "format").filter(|format| *format != "full") {
+                Some(format) => api.get_message(id, format, &names(&args, "metadata_headers")).await,
+                None => api.get_message(id, "full", &[]).await.map(|full| super::readable::message(&full)),
+            }
+        }
         "send_message" => api.send_message(&raw_message(&args)?).await,
         "trash_message" => api.trash_message(str_field(&args, "id")).await,
         "untrash_message" => api.untrash_message(str_field(&args, "id")).await,
@@ -99,7 +121,13 @@ pub async fn execute(client: &GoogleClient, action: &str, args: Value) -> Result
         }
         "get_attachment" => api.get_attachment(str_field(&args, "message_id"), str_field(&args, "attachment_id")).await,
         "list_threads" => api.list_threads(str_opt(&args, "query"), u32_field(&args, "max_results", 20), str_opt(&args, "page_token")).await,
-        "get_thread" => api.get_thread(str_field(&args, "id"), str_opt(&args, "format").unwrap_or("full")).await,
+        "get_thread" => {
+            let id = id_of(&args, action, &THREAD_ID)?;
+            match str_opt(&args, "format").filter(|format| *format != "full") {
+                Some(format) => api.get_thread(id, format).await,
+                None => api.get_thread(id, "full").await.map(|full| super::readable::thread(&full)),
+            }
+        }
         "trash_thread" => api.trash_thread(str_field(&args, "id")).await,
         "untrash_thread" => api.untrash_thread(str_field(&args, "id")).await,
         "delete_thread" => api.delete_thread(str_field(&args, "id")).await,

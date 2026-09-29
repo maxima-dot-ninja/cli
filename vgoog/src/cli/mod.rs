@@ -7,6 +7,7 @@ pub mod exec;
 pub mod forms;
 pub mod gmail;
 pub mod people;
+pub mod readable;
 pub mod sheets;
 pub mod slides;
 pub mod tasks;
