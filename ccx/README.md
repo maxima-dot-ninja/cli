@@ -1,15 +1,18 @@
 # ccx
 
 **ccx is how you start Claude Code every day.** It runs `claude` on Opus 5.5 at xhigh effort, in auto permission mode, with
-remote control on. It names each session after the folder it runs in, and by default it picks up
-the last session of that folder that is no longer running. A few subcommands list, summarize and
-delete past sessions. ccx is one bash script, and it lives in the [_cli](../README.md) repo.
+remote control on. **By default every session is a ghost**, which means it is deleted, with every
+trace of it, as soon as Claude exits. `ccx --persist` keeps sessions instead: it picks up the
+folder's last session that is no longer running, or starts a new kept one named after the folder.
+A few subcommands list, summarize and delete kept sessions. ccx is one bash script, and it lives in
+the [_cli](../README.md) repo.
 
 ```sh
-ccx                          # resume this folder's last ended session, or start a new one
-ccx new                      # always start a new session
+ccx                          # a new session that is deleted, with every trace, when claude exits
+ccx --persist                # resume this folder's last ended session, or start a new kept one
+ccx new                      # always start a new kept session
 ccx --model sonnet           # any claude flag passes straight through, and yours win
-ccx new --name spike         # a new session under your own name, with no numbering
+ccx new --name spike         # a new kept session under your own name, with no numbering
 ccx details                  # every session of this folder, each with a one-sentence summary
 ccx delete croissant-api-002 # delete a session by its name, from any folder
 ccx clear-all                # delete every ended session of this folder
@@ -21,7 +24,61 @@ ccx help                     # print the command list
 
 ## What plain `ccx` does
 
-Running `ccx` first looks for a session to resume. It reads the transcripts Claude keeps for the
+Plain `ccx` starts a **new session** with the same defaults as `ccx new`, and **deletes it with
+every trace** as soon as Claude exits. This throwaway session is called a ghost. Any claude flag
+works, the same as with `ccx new`, but a ghost never resumes anything: Claude refuses to start
+when `--resume` or `--continue` comes with the `--session-id` ccx passes, so use
+`ccx --persist --resume ID` for that. ccx runs this command line and stays running underneath it
+until Claude exits:
+
+```sh
+claude --model claude-opus-5-5 --effort xhigh --permission-mode auto --remote-control NAME --name NAME --session-id ID --settings HOOK [your args]
+```
+
+The name is the folder's base name with `-ghost` and a counter, such as `dev-cli-ghost-000`. It
+only has to be free among running sessions, because a ghost's title is deleted along with it. So
+ccx skips the transcript scan, and a ghost starts in about **50 ms** instead of 2.5 seconds. Your
+own `--name` replaces it, just as with `ccx new`.
+
+ccx keeps a **list of the ghost's session ids** in `~/.config/ccx/ghosts/<pid>`, named after its
+own pid. It picks the first id itself and passes it as `--session-id`. A `/clear` inside a ghost
+starts a new session with a new id, so ccx also passes a `SessionStart` hook through `--settings`
+that adds every new session's id to the list. A session you open with `/resume` from inside a
+ghost stays off the list, because it was a real session before the ghost opened it, so it is
+never deleted.
+
+When Claude exits, ccx deletes every session on the list and prints one line for each. For each
+session it removes these:
+
+- It removes the transcript and its `<id>/` folder from whichever project holds them, and that
+  project's `sessions-index.json`.
+- It removes the `/rewind` file history in `~/.claude/file-history/<id>/` and the saved shell env
+  in `~/.claude/session-env/<id>/`.
+- It removes the session's prompts from `~/.claude/history.jsonl`, which is the up-arrow list,
+  and its cached summary, if one exists.
+
+Every session appends to `history.jsonl`, so ccx filters the ghost's lines out of it instead of
+deleting the file. It writes the result to a private temp file and renames that over the original,
+and it skips the rewrite when the session has no lines in it. Each session takes about **45 ms**
+to delete, and almost all of that is the history rewrite.
+
+The cleanup also runs when you **close the terminal window** or stop ccx with a plain `kill`. On a
+closed terminal, ccx sends its own output to `/dev/null` first. Nobody can see it then anyway, and
+in macOS's bash 3.2 one write that fails on the dead terminal makes the next session's history
+filter silently skip.
+
+When ccx dies in a way it cannot catch, such as `kill -9`, its list stays behind. **Every ccx run
+sweeps those lists first**, so any list whose ccx is gone gets deleted the same way before ccx does
+anything else. A session on such a list that a live Claude still holds is reported as
+`(running, kept)`, and its list stays until a later run finds it ended. `ccx --persist` also never
+resumes a session that a running ghost has on its list.
+
+Remote Control stays on, as with every ccx launch, and ccx only deletes what is on this machine.
+
+## What `ccx --persist` does
+
+`ccx --persist` is how you get a session that stays. It first looks for a session to resume. It
+reads the transcripts Claude keeps for the
 current folder in `~/.claude/projects/<slug>/`, and it picks the one whose **newest message** is
 the most recent. It sorts on the timestamp of that last message rather than on the file's modified
 time, because appending a title to a transcript would otherwise bump it to the top. A transcript
@@ -36,18 +93,20 @@ Claude on the machine, not only the ones in this folder.
 When ccx finds a session, it resumes it **under that session's own title**, so the Remote Control
 name matches what the `/resume` picker shows. A session started by plain `claude` has no title, and
 ccx gives it a fresh name the same way it names a new session. When nothing is left to resume, ccx
-starts a new session.
+starts a new kept session.
 
-To start fresh, run **`ccx new`**. Passing your own `--name` to plain `ccx` also skips the resume
-and starts a new session.
+To start a fresh kept session, run **`ccx new`**. Passing your own `--name` to `ccx --persist` also
+skips the resume and starts a new kept session.
 
 The folder is resolved with `pwd -P`, so a symlinked folder maps to its real path. Claude uses the
 real path for its own folder names too, so the two agree.
 
 ## What it passes to `claude`
 
-Every launch uses `exec`, so ccx replaces itself with `claude` and leaves nothing running behind
-it. It runs one of these three command lines, and your own arguments always go at the end:
+`ccx --persist` and `ccx new` use `exec`, so ccx replaces itself with `claude` and leaves nothing
+running behind it. A ghost runs `claude` as a child instead, because ccx has to outlive it to
+delete it, and its command line is in the section on [plain `ccx`](#what-plain-ccx-does). The kept
+launches run one of these three command lines, and your own arguments always go at the end:
 
 ```sh
 # resuming an ended session
@@ -67,10 +126,10 @@ risky ones, instead of skipping every check. `--remote-control NAME` opens
 the session to Remote Control under the same name that `--name` puts in the prompt box, the
 `/resume` picker and the terminal title.
 
-**Arguments you give plain `ccx` go to the resumed session** when there is one, because they land
-after `--resume`. Use `ccx new` when you want them on a fresh session instead. Any first word that
-is not a subcommand counts as a `claude` argument, so a typo such as `ccx detail` resumes the last
-session and hands it `detail` as a prompt.
+**Arguments you give `ccx --persist` go to the resumed session** when there is one, because they
+land after `--resume`. Use `ccx new` when you want them on a fresh session instead. Any first word
+that is not a subcommand counts as a `claude` argument, so a typo such as `ccx detail` starts a
+ghost and hands it `detail` as a prompt.
 
 With your own `--name`, ccx passes `--remote-control` with no value, so Claude Code picks the
 Remote Control name itself. `--remote-control` takes an optional value, so **put a flag first** in
@@ -195,18 +254,25 @@ are the same lines. `-h` and `--help` do the same thing.
   reads it, for the session id and the name, and it ignores records whose pid is gone.
 - **`~/.claude/projects/<slug>/<session-id>.jsonl`** is a session's transcript. The slug is the
   folder's absolute path with every character other than letters, digits and dashes turned into a
-  dash. ccx reads transcripts for titles and timestamps, and `delete` and `clear-all` delete them.
+  dash. ccx reads transcripts for titles and timestamps, and `delete`, `clear-all` and a ghost's
+  cleanup delete them.
 - **`~/.claude/projects/<slug>/<session-id>/`** holds a session's tool results and subagent
-  transcripts, and `delete` and `clear-all` remove it along with the transcript.
-- **`~/.claude/projects/<slug>/sessions-index.json`** is a cache Claude rebuilds, and `delete` and
-  `clear-all` remove it.
+  transcripts, and `delete`, `clear-all` and a ghost's cleanup remove it along with the transcript.
+- **`~/.claude/projects/<slug>/sessions-index.json`** is a cache Claude rebuilds, and `delete`,
+  `clear-all` and a ghost's cleanup remove it.
 - **`~/.claude/projects/<slug>/memory/`** is never read or written by ccx.
+- **`~/.claude/file-history/<session-id>/`** and **`~/.claude/session-env/<session-id>/`** hold a
+  session's `/rewind` snapshots and its saved shell env. Only a ghost's cleanup removes them.
+- **`~/.claude/history.jsonl`** is the up-arrow list of prompts that every session appends to. Only
+  a ghost's cleanup touches it, and it removes only the ghost's own lines.
 - **`~/.config/ccx/summaries/<session-id>`** is the summary cache. `details` creates it, and
-  `delete` and `clear-all` remove it.
+  `delete`, `clear-all` and a ghost's cleanup remove it.
+- **`~/.config/ccx/ghosts/<pid>`** is a ghost's list of session ids. Plain `ccx` creates it, and
+  the ghost itself or the next ccx run removes it once every session on it is deleted.
 
-ccx needs **bash**, **Claude Code** (`claude`) on your `PATH`, and **jq** for `details`. macOS
-ships jq in `/usr/bin`, and the other tools it uses, such as grep, sed and sort, come with the
-system. There is nothing to configure and no key to set.
+ccx needs **bash**, **Claude Code** (`claude`) on your `PATH`, and **jq** for `details` and
+for ghosts. macOS ships jq in `/usr/bin`, and the other tools it uses, such as grep, sed, sort and
+uuidgen, come with the system. There is nothing to configure and no key to set.
 
 ## Install
 

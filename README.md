@@ -11,7 +11,7 @@ Personal command-line tools. One repo, eight independent tools, no shared build.
 | [**waspy**](waspy/README.md) | Read your WhatsApp from the terminal, read-only | Rust | ✅ |
 | [**phog**](phog/README.md) | PostHog — HogQL, people by fingerprint, dashboards as files | Rust | ✅ |
 | [**lgit**](lgit/README.md) | AI-written commit messages, and a plain-English `status` | Rust | — |
-| [**ccx**](ccx/README.md) | Claude Code launcher that resumes a folder's last session and names new ones | Bash | — |
+| [**ccx**](ccx/README.md) | Claude Code launcher whose sessions delete themselves on exit, unless you pass `--persist` | Bash | — |
 
 Each tool stands alone — install only what you want.
 
@@ -203,23 +203,29 @@ Full docs: [lgit/README.md](lgit/README.md).
 
 ## ccx
 
-Launches Claude Code with permissions bypassed and Remote Control on. By default it **resumes this
-folder's last ended session**; otherwise it starts a new one named after the folder, so parallel
-sessions are easy to tell apart.
+Launches Claude Code on Opus 5.5 at xhigh effort, in auto permission mode, with Remote Control on.
+By default every session is a **ghost**: it is deleted, with every trace of it, as soon as Claude
+exits. `ccx --persist` keeps sessions instead, and names each new one after its folder, so
+parallel sessions are easy to tell apart.
 
 ```sh
-ccx                   # resume this folder's last ended session, or start a new one
-ccx new               # always start a new, auto-named session
+ccx                   # a new session that is deleted, with every trace, when claude exits
+ccx --persist         # resume this folder's last ended session, or start a new kept one
+ccx new               # always start a new, auto-named kept session
 ccx details [dir]     # every session of a folder, each with a one-sentence summary
 ccx delete <name...>  # delete sessions by name, from any folder
 ccx clear-all [dir]   # delete every ended session of a folder
 ```
 
-Plain `ccx` looks through this folder's transcripts in `~/.claude/projects/`, skips any session a
-running Claude still holds, and resumes the one with the newest message under its own title. When
-there is nothing to resume, or you pass your own `--name`, it starts a new session, and `ccx new`
-always does. Every launch runs `claude --dangerously-skip-permissions --remote-control <name> --name
-<name>`, adds `--resume <id>` when it resumes, and passes your own arguments on at the end.
+When a ghost's Claude exits, ccx deletes the transcript, its tool results, the `/rewind` history,
+the saved shell env and the session's lines in `~/.claude/history.jsonl`. It does the same for
+the new session a `/clear` starts. A ghost killed before it could clean up is swept by the next ccx
+run.
+
+`ccx --persist` looks through this folder's transcripts in `~/.claude/projects/`, skips any session
+a running Claude still holds, and resumes the one with the newest message under its own title.
+When there is nothing to resume, or you pass your own `--name`, it starts a new kept session, and
+`ccx new` always does. Your own arguments always go at the end of the `claude` command line.
 
 A new session is named after the **last two parts of its path** plus the lowest free three-digit
 number, so `~/dev/_www/croissant/api` starts at `croissant-api-000`. A name counts as taken while a

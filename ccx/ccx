@@ -1,16 +1,20 @@
 #!/usr/bin/env bash
 # ccx — claude on Opus 5.5 at xhigh effort, in auto permission mode, with
-# remote control on.
+# remote control on. By default the session is a ghost: it is deleted, with
+# every trace of it, as soon as claude exits. --persist and new keep it.
 #
-# Names the session after the last two path components plus a counter, so
+# Names a kept session after the last two path components plus a counter, so
 # dev/_www/croissant/api becomes croissant-api-000, and the next session in the
 # same folder becomes croissant-api-001. A number is never reused: every title
 # that ever appeared in a transcript counts as taken, so ended sessions keep
 # their name in the /resume picker without collisions.
 #
-#   ccx [claude args...]        resume the last active session of cwd that is not
+#   ccx [claude args...]        start a new session that is deleted, with every
+#                               trace of it, as soon as claude exits
+#   ccx --persist [claude args...]
+#                               resume the last active session of cwd that is not
 #                               running anywhere, or start a new one if none is left
-#   ccx new [claude args...]    start a new session (pass --name to opt out of naming)
+#   ccx new [claude args...]    start a new kept session (pass --name to opt out of naming)
 #   ccx details [dir]           list ended sessions of dir (default: cwd), one
 #                               line each with an AI one-sentence summary
 #   ccx cleanup [dir]           renumber ended sessions of dir (default: cwd)
@@ -25,6 +29,7 @@
 SESSIONS="$HOME/.claude/sessions"
 PROJECTS="$HOME/.claude/projects"
 SUMMARIES="$HOME/.config/ccx/summaries"
+GHOSTS="$HOME/.config/ccx/ghosts"
 
 # Every launch starts with these. The caller's args go last, so a --model or
 # --effort passed to ccx wins over the defaults here.
@@ -276,16 +281,17 @@ delete() {
 # The ended session of cwd with the newest message. It sorts on the last
 # timestamp rather than file mtime, since cleanup appends titles to ended
 # transcripts and would bump them to the top. A transcript with no messages
-# yet has nothing to resume and is skipped.
+# yet has nothing to resume and is skipped, and so is any session a running
+# ghost has listed, since it is deleted when that ghost exits.
 last_ended() {
-  local dir live file id seen
+  local dir skip file id seen
   dir=$(project_dir "$(pwd -P)")
-  live=$(live_field sessionId)
+  skip=$(live_field sessionId; cat "$GHOSTS"/* 2>/dev/null)
   for file in "$dir"/*.jsonl; do
     [ -e "$file" ] || continue
     id=${file##*/}
     id=${id%.jsonl}
-    grep -qxF "$id" <<<"$live" && continue
+    grep -qxF "$id" <<<"$skip" && continue
     seen=$(last_seen "$file")
     [ -n "$seen" ] && printf '%s %s\n' "$seen" "$id"
   done | sort | tail -1 | cut -d' ' -f2
@@ -320,9 +326,114 @@ start_new() {
   exec "${CLAUDE[@]}" "$name" --name "$name" "$@"
 }
 
+# Resumes the last ended session of cwd, or starts a new kept one when there
+# is nothing to resume. A --name from the caller skips the resume.
+persist() {
+  has_name "$@" || resume_last "$@"
+  start_new "$@"
+}
+
+# The up-arrow list in ~/.claude/history.jsonl is one file every session
+# appends to, so a session's prompts are filtered out of it rather than the
+# file being deleted. The rewrite goes through a private temp file and a
+# rename, and is skipped when the session has no prompts in it.
+forget_prompts() {
+  local key="\"sessionId\":\"$1\"" history="$HOME/.claude/history.jsonl"
+  grep -qF "$key" "$history" 2>/dev/null || return 0
+  (umask 077 && grep -vF "$key" "$history" >"$history.ccx")
+  mv "$history.ccx" "$history"
+}
+
+# Removes everything Claude keeps under a session id: the transcript and its
+# <id>/ folder in whichever project holds them, that project's index cache,
+# the /rewind file history, the saved shell env, ccx's summary, and the
+# session's prompts. The id must look like a uuid, because an empty one would
+# turn the project globs below into every project.
+forget() {
+  local id="$1" file
+  [[ $id =~ ^[0-9a-f-]{36}$ ]] || return 0
+  for file in "$PROJECTS"/*/"$id".jsonl; do
+    [ -e "$file" ] && rm -f "${file%/*}/sessions-index.json"
+  done
+  rm -rf "$PROJECTS"/*/"$id".jsonl "$PROJECTS"/*/"$id" \
+    "$HOME/.claude/file-history/$id" "$HOME/.claude/session-env/$id" "$SUMMARIES/$id"
+  forget_prompts "$id"
+  echo "  $id  deleted"
+}
+
+# Forgets every session a ghost listed, then its list. A session a live
+# claude holds is kept, and so is the list, so a later sweep retries it once
+# that claude is gone. Rerunning on a finished list does nothing.
+bury() {
+  local list="$1" live id kept=0
+  live=$(live_field sessionId)
+  for id in $(sort -u "$list"); do
+    if grep -qxF "$id" <<<"$live"; then
+      echo "  $id  (running, kept)"
+      kept=1
+      continue
+    fi
+    forget "$id"
+  done
+  [ "$kept" = 1 ] || rm -f "$list"
+}
+
+# A ghost whose ccx died before it could clean up (kill -9, a crash) leaves
+# its list behind. Every ccx run buries those first, so a dead ghost's session
+# never lingers or gets resumed. A list whose ccx is still alive is skipped,
+# since that ghost cleans up after itself.
+sweep_ghosts() {
+  local list
+  for list in "$GHOSTS"/*; do
+    [ -e "$list" ] || continue
+    kill -0 "${list##*/}" 2>/dev/null && continue
+    bury "$list"
+  done
+}
+
+# Claude runs this on every SessionStart of a ghost and gets the event as JSON
+# on stdin. It adds the session id to the ghost's list, which catches the new
+# session /clear starts. A session opened with /resume is left off, since it
+# was a real session before the ghost opened it.
+ghost_hook() {
+  jq -nc --arg cmd "jq -r 'select(.source != \"resume\") | .session_id' >> '$1'" \
+    '{hooks: {SessionStart: [{hooks: [{type: "command", command: $cmd}]}]}}'
+}
+
+# The default launch: a new session that is deleted when claude exits. A
+# --resume or --continue from the caller makes claude refuse to start, since
+# it will not take --session-id with them, so nothing is resumed into a ghost.
+# Its ids go in a list named
+# after this ccx's pid, starting with one picked here for --session-id, and
+# claude runs as a child instead of exec so ccx is still around to bury them.
+# The EXIT trap covers a normal quit, and HUP, INT and TERM (a closed terminal,
+# a kill) turn into an exit so it runs then too. On HUP the output goes to
+# /dev/null first: nobody can see it, and in macOS's bash 3.2 one echo that
+# fails on the dead terminal makes the next session's history filter silently
+# skip. A ghost's title never outlives it, so its name only has to be free
+# among running sessions, which skips the transcript scan a normal name costs.
+ghost() {
+  local list="$GHOSTS/$$" id name args
+  id=$(uuidgen | tr '[:upper:]' '[:lower:]')
+  mkdir -p "$GHOSTS"
+  echo "$id" >>"$list"
+  trap "bury '$list'" EXIT
+  trap 'exec >/dev/null 2>&1; exit 129' HUP
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+  args=(--session-id "$id" --settings "$(ghost_hook "$list")")
+  if ! has_name "$@"; then
+    name=$(pick_name "$(base_name)-ghost" "$(live_field name)")
+    args=("$name" --name "$name" "${args[@]}")
+  fi
+  "${CLAUDE[@]}" "${args[@]}" "$@"
+}
+
 # The usage block lives in the header comment above, so the docs and the help
 # text are the same lines.
 help() { sed -n 's/^#   //p' "$0"; }
+
+sweep_ghosts
 
 case "$1" in
   details) shift; details "$@"; exit ;;
@@ -330,8 +441,8 @@ case "$1" in
   delete) shift; delete "$@"; exit ;;
   clear-all) shift; clear_all "$@"; exit ;;
   new) shift; start_new "$@" ;;
+  --persist) shift; persist "$@" ;;
   help | -h | --help) help; exit ;;
 esac
 
-has_name "$@" || resume_last "$@"
-start_new "$@"
+ghost "$@"
