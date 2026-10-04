@@ -12,6 +12,7 @@ tools:
       docs, slides, forms, tasks, contacts, apps_script), an action, and that action's arguments as
       an object. Returns JSON. If you are not certain of the exact action name or the arguments it
       takes, call google_actions FIRST — guessing an action name wastes a turn.
+      A reply to an email is `draft_reply`, never gmail create_draft / update_draft.
     argv: [exec, "{{service}}", "{{action}}", "{{args?}}", [--account, "{{account?}}"]]
     timeout_ms: 120000
     input:
@@ -212,6 +213,20 @@ Stop and ask ONLY where the action cannot be taken back:
 - deleting an event other people are already invited to
 
 That is the whole list. Report what you did when you are finished, not what you are about to do.
+
+## Reply drafts
+
+A reply to an email in his mailbox is drafted with `verified-reply-draft` (`draft_reply` inside
+vaulty), never with `create_draft` and never into a file. It takes the message id and the body,
+works out To, Subject and the threading headers from the message being answered, files the draft in
+that thread, and reads it back before it says it worked.
+
+```bash
+verified-reply-draft --message-id <id> --body "Looks good to me. Ship it."
+```
+
+`create_draft` stays for a NEW email that answers nothing. Give it `raw`. To file a draft in an
+existing thread, pass `thread_id` too, because Gmail ignores the reply headers without it.
 
 ## Gotchas
 
