@@ -228,17 +228,17 @@ impl<'a> GmailApi<'a> {
         self.client.get(&url).await
     }
 
-    pub async fn create_draft(&self, raw: &str) -> Result<Value> {
+    pub async fn create_draft(&self, raw: &str, thread_id: Option<&str>) -> Result<Value> {
         let url = format!("{BASE}/drafts");
         self.client
-            .post(&url, &json!({ "message": { "raw": raw } }))
+            .post(&url, &json!({ "message": draft_message(raw, thread_id) }))
             .await
     }
 
-    pub async fn update_draft(&self, id: &str, raw: &str) -> Result<Value> {
+    pub async fn update_draft(&self, id: &str, raw: &str, thread_id: Option<&str>) -> Result<Value> {
         let url = format!("{BASE}/drafts/{id}");
         self.client
-            .put(&url, &json!({ "message": { "raw": raw } }))
+            .put(&url, &json!({ "message": draft_message(raw, thread_id) }))
             .await
     }
 
@@ -420,6 +420,15 @@ impl<'a> GmailApi<'a> {
             url.push_str(&format!("&pageToken={pt}"));
         }
         self.client.get(&url).await
+    }
+}
+
+/// A draft's `message`: the raw source, and the thread it is filed in when it has one. Without
+/// `threadId` Gmail ignores the reply headers and starts a new conversation.
+fn draft_message(raw: &str, thread_id: Option<&str>) -> Value {
+    match thread_id {
+        Some(thread_id) => json!({ "raw": raw, "threadId": thread_id }),
+        None => json!({ "raw": raw }),
     }
 }
 

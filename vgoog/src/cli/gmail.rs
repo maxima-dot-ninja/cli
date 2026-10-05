@@ -66,6 +66,18 @@ fn raw_message(args: &Value) -> Result<String> {
     Ok(build_raw_email(to, str_field(fields, "subject"), str_field(fields, "body"), str_opt(fields, "cc"), str_opt(fields, "bcc")))
 }
 
+/// The thread a draft is filed in, by whichever name the caller used. Gmail only puts a draft in a
+/// thread when the request names it: a reply with the right In-Reply-To, References and Subject but
+/// no threadId was saved as a conversation of its own, and the owner never saw it under the email
+/// it answered.
+fn thread_of(args: &Value) -> Option<&str> {
+    ["thread_id", "threadId"]
+        .iter()
+        .find_map(|name| str_opt(args, name))
+        .or_else(|| args.pointer("/message/threadId").and_then(Value::as_str))
+        .filter(|id| !id.trim().is_empty())
+}
+
 pub async fn execute(client: &GoogleClient, action: &str, args: Value) -> Result<Value> {
     let api = GmailApi::new(client);
     match action {
@@ -154,8 +166,8 @@ pub async fn execute(client: &GoogleClient, action: &str, args: Value) -> Result
         "delete_label" => api.delete_label(str_field(&args, "id")).await,
         "list_drafts" => api.list_drafts(u32_field(&args, "max_results", 20), str_opt(&args, "page_token")).await,
         "get_draft" => api.get_draft(str_field(&args, "id"), str_opt(&args, "format").unwrap_or("full")).await,
-        "create_draft" => api.create_draft(&raw_message(&args)?).await,
-        "update_draft" => api.update_draft(str_field(&args, "id"), &raw_message(&args)?).await,
+        "create_draft" => api.create_draft(&raw_message(&args)?, thread_of(&args)).await,
+        "update_draft" => api.update_draft(str_field(&args, "id"), &raw_message(&args)?, thread_of(&args)).await,
         "send_draft" => api.send_draft(str_field(&args, "id")).await,
         "delete_draft" => api.delete_draft(str_field(&args, "id")).await,
         "get_vacation_settings" => api.get_vacation_settings().await,
@@ -221,5 +233,14 @@ mod tests {
     fn no_message_is_refused_rather_than_saved_blank() {
         assert!(raw_message(&json!({})).is_err());
         assert!(raw_message(&json!({ "raw": "" })).is_err());
+    }
+
+    #[test]
+    fn thread_is_read_by_any_name() {
+        assert_eq!(thread_of(&json!({ "raw": "abc", "thread_id": "t1" })), Some("t1"));
+        assert_eq!(thread_of(&json!({ "raw": "abc", "threadId": "t1" })), Some("t1"));
+        assert_eq!(thread_of(&json!({ "message": { "raw": "abc", "threadId": "t1" } })), Some("t1"));
+        assert_eq!(thread_of(&json!({ "raw": "abc", "thread_id": " " })), None);
+        assert_eq!(thread_of(&json!({ "raw": "abc" })), None);
     }
 }
