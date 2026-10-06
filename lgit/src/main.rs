@@ -36,6 +36,11 @@ struct Cli {
     #[arg(long)]
     gpginfo: bool,
 
+    /// Commit without asking: accept the message and sign with the first GPG
+    /// key, or commit unsigned when there is none. Works with --root and --tag.
+    #[arg(short = 'y', long)]
+    yes: bool,
+
     /// Create a git tag after committing (e.g., --tag v1.0.0)
     #[arg(long, value_name = "VERSION")]
     tag: Option<String>,
@@ -102,11 +107,11 @@ async fn main() -> Result<()> {
     }
 
     if cli.root {
-        return run_root_flow(cli.tag).await;
+        return run_root_flow(cli.tag, cli.yes).await;
     }
 
     // Main commit flow
-    run_commit_flow(cli.tag).await
+    run_commit_flow(cli.tag, cli.yes).await
 }
 
 /// Everything the review loop needs about one repo's staged change. Built in
@@ -135,7 +140,7 @@ fn read_staged() -> Result<Option<Staged>> {
     Ok(Some(Staged { changes, diff, summary, paths }))
 }
 
-async fn run_commit_flow(tag: Option<String>) -> Result<()> {
+async fn run_commit_flow(tag: Option<String>, yes: bool) -> Result<()> {
     // Display header
     ui::print_header();
 
@@ -155,7 +160,7 @@ async fn run_commit_flow(tag: Option<String>) -> Result<()> {
     let first = ai::generate_commit(&cfg, &staged.summary, &staged.diff, &[]).await;
     spinner.finish_and_clear();
 
-    review_and_commit(&cfg, &staged, first?, tag.as_deref()).await?;
+    review_and_commit(&cfg, &staged, first?, tag.as_deref(), yes).await?;
     Ok(())
 }
 
@@ -175,8 +180,9 @@ struct RepoJob {
 
 /// `lgit --root`: every repo one level below the current directory gets
 /// `git add -A`, its commit message is generated in parallel with the others,
-/// and the developer reviews each one as soon as its message is ready.
-async fn run_root_flow(tag: Option<String>) -> Result<()> {
+/// and the developer reviews each one as soon as its message is ready — or,
+/// with `yes`, each one is committed as soon as its message is ready.
+async fn run_root_flow(tag: Option<String>, yes: bool) -> Result<()> {
     ui::print_header();
     let cfg = config::load_config()?;
     let root = std::env::current_dir().context("Could not read the current directory")?;
@@ -268,7 +274,7 @@ async fn run_root_flow(tag: Option<String>) -> Result<()> {
             .with_context(|| format!("Could not enter {}", job.path.display()))?;
         ui::print_staged_changes(&job.staged.changes);
 
-        let outcome = match review_and_commit(&cfg, &job.staged, message, tag.as_deref()).await {
+        let outcome = match review_and_commit(&cfg, &job.staged, message, tag.as_deref(), yes).await {
             Ok(true) => Outcome::Committed,
             Ok(false) => Outcome::Skipped,
             Err(e) => {
@@ -305,12 +311,14 @@ pub(crate) fn repo_name(path: &Path) -> String {
 /// The interactive loop over one proposed message: accept, edit, ask,
 /// regenerate, or cancel. Runs against the repo in the current directory.
 /// Returns `true` when a commit was made and `false` when the developer
-/// cancelled.
+/// cancelled. `yes` takes the default at every menu, so it commits the first
+/// message, signed with the first key.
 async fn review_and_commit(
     cfg: &config::Config,
     staged: &Staged,
     first_message: String,
     tag: Option<&str>,
+    yes: bool,
 ) -> Result<bool> {
     let mut commit_msg = first_message;
 
@@ -320,7 +328,7 @@ async fn review_and_commit(
     loop {
         ui::print_commit_message(&commit_msg);
 
-        match ui::prompt_action()? {
+        match ui::prompt_action(yes)? {
             ui::UserAction::Accept => {
                 // Get available GPG keys and prompt for signing choice
                 let gpg_keys = git::list_gpg_keys()?;
@@ -328,7 +336,7 @@ async fn review_and_commit(
                 let committed = if gpg_keys.is_empty() {
                     // No GPG keys - offer unsigned commit or show help
                     ui::print_warning("No GPG keys found. Run `lgit --gpginfo` for setup instructions.");
-                    if ui::prompt_unsigned_commit()? {
+                    if ui::prompt_unsigned_commit(yes)? {
                         git::commit_unsigned(&commit_msg)?;
                         ui::print_success("Committed successfully (unsigned)!");
                         true
@@ -338,7 +346,7 @@ async fn review_and_commit(
                     }
                 } else {
                     // GPG keys available - let user choose
-                    match ui::prompt_signing_choice(&gpg_keys)? {
+                    match ui::prompt_signing_choice(&gpg_keys, yes)? {
                         ui::SigningChoice::Signed(key) => {
                             git::commit_signed(&commit_msg, &key.key_id)?;
                             ui::print_success("Committed successfully (signed)!");

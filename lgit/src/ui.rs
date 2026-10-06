@@ -95,9 +95,25 @@ pub fn print_commit_message(message: &str) {
     print_separator();
 }
 
-/// Prompt the user for their action choice
-pub fn prompt_action() -> Result<UserAction> {
-    let items = vec![
+/// Pick from a menu whose default is its first item. With `-y` nothing is
+/// asked: the default is taken and printed the way dialoguer prints a choice,
+/// so an unattended run reads the same as one you clicked through.
+fn choose<T: ToString>(prompt: &str, items: &[T], yes: bool) -> Result<usize> {
+    if yes {
+        println!("{}: {}", prompt, items[0].to_string());
+        return Ok(0);
+    }
+    Select::new()
+        .with_prompt(prompt)
+        .items(items)
+        .default(0)
+        .interact()
+        .with_context(|| format!("Failed to get an answer to: {prompt}"))
+}
+
+/// Prompt the user for their action choice. `yes` accepts.
+pub fn prompt_action(yes: bool) -> Result<UserAction> {
+    let items = [
         "✓ Accept and commit",
         "✎ Edit message",
         "? Ask about the changes",
@@ -105,14 +121,7 @@ pub fn prompt_action() -> Result<UserAction> {
         "✕ Cancel",
     ];
 
-    let selection = Select::new()
-        .with_prompt("What would you like to do?")
-        .items(&items)
-        .default(0)
-        .interact()
-        .context("Failed to get user selection")?;
-
-    Ok(match selection {
+    Ok(match choose("What would you like to do?", &items, yes)? {
         0 => UserAction::Accept,
         1 => UserAction::Edit,
         2 => UserAction::Ask,
@@ -206,43 +215,27 @@ pub fn edit_message(current: &str) -> Result<String> {
     Ok(edited.trim().to_string())
 }
 
-/// Prompt user to select signing option (GPG key or unsigned)
-pub fn prompt_signing_choice(keys: &[GpgKey]) -> Result<SigningChoice> {
+/// Prompt user to select signing option (GPG key or unsigned). `yes` signs
+/// with the first key gpg lists.
+pub fn prompt_signing_choice(keys: &[GpgKey], yes: bool) -> Result<SigningChoice> {
     let mut items: Vec<String> = keys
         .iter()
         .map(|k| format!("🔐 {} ({})", k.user_id, k.key_id))
         .collect();
     items.push("📝 Commit without signing".to_string());
 
-    let selection = Select::new()
-        .with_prompt("Select signing option")
-        .items(&items)
-        .default(0)
-        .interact()
-        .context("Failed to get signing selection")?;
-
-    if selection < keys.len() {
-        Ok(SigningChoice::Signed(keys[selection].clone()))
-    } else {
-        Ok(SigningChoice::Unsigned)
-    }
+    let selection = choose("Select signing option", &items, yes)?;
+    Ok(match keys.get(selection) {
+        Some(key) => SigningChoice::Signed(key.clone()),
+        None => SigningChoice::Unsigned,
+    })
 }
 
-/// Prompt for unsigned commit when no GPG keys available
-pub fn prompt_unsigned_commit() -> Result<bool> {
-    let items = vec![
-        "📝 Commit without signing",
-        "✕ Cancel",
-    ];
-
-    let selection = Select::new()
-        .with_prompt("No GPG keys found. What would you like to do?")
-        .items(&items)
-        .default(0)
-        .interact()
-        .context("Failed to get selection")?;
-
-    Ok(selection == 0)
+/// Prompt for unsigned commit when no GPG keys available. `yes` commits
+/// unsigned.
+pub fn prompt_unsigned_commit(yes: bool) -> Result<bool> {
+    let items = ["📝 Commit without signing", "✕ Cancel"];
+    Ok(choose("No GPG keys found. What would you like to do?", &items, yes)? == 0)
 }
 
 /// Display GPG setup instructions

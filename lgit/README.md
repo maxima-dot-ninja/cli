@@ -175,6 +175,22 @@ calls all go out together, and each repo prints as its answer arrives. Repos wit
 nothing going on are named on one line instead of getting a section each, and a repo
 whose explanation fails still shows its branch and file counts.
 
+### Without asking
+
+`lgit -y` (or `--yes`) takes the default at every menu, so nothing is asked. It
+accepts the first message the model writes and signs it with the first key that
+`gpg --list-secret-keys` lists. With no key at all it commits unsigned. Each choice
+it makes is still printed, so the output reads the same as a run you clicked through:
+
+```
+What would you like to do?: ✓ Accept and commit
+Select signing option: 🔐 a32ninja (M1 GPG Key) <uri@maxima.ninja> (C0F1926268E0B886)
+```
+
+It works with `--root`, where every repo is committed as soon as its message comes
+back, and with `--tag`. A repo whose message fails to generate is reported in the
+summary and left uncommitted.
+
 ### What's going on here?
 
 `lgit status` is `git status` written for a person. It reads the branch and its
@@ -223,7 +239,9 @@ lgit                  # Run the commit flow
 lgit status           # Explain what's going on in this repo, in plain English
 lgit status --root    # Explain every repo in this folder
 lgit --tag v1.0.0     # Commit, then tag it
+lgit -y               # Commit without asking: accept the message, sign with the first key
 lgit --root           # Commit every repo in this folder, one after another
+lgit --root -y        # Commit every repo in this folder without asking
 lgit --setup          # Re-run setup wizard
 lgit --model          # Change AI model (can switch providers)
 lgit --key            # Manage API keys
