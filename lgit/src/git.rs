@@ -476,21 +476,45 @@ pub fn pull() -> Result<()> {
     Ok(())
 }
 
-/// Get the URL for creating a PR on GitHub/GitLab
+/// Where `git push` sends this branch, decided the way git decides it: the branch's own
+/// pushRemote, then remote.pushDefault, then the branch's upstream remote, then origin. The
+/// branch's name over there is its upstream's when it pushes to its upstream remote, and its own
+/// otherwise.
+///
+/// The PR link used to read `origin` whatever the branch tracked, so a branch that pushed to a
+/// fork got a link to a compare page for a branch that was never pushed there.
+fn push_target(repo: &Repository, branch: &str) -> (String, String) {
+    let config = repo.config().ok();
+    let get = |key: &str| config.as_ref().and_then(|c| c.get_string(key).ok());
+    let upstream = get(&format!("branch.{branch}.remote"));
+    let remote = get(&format!("branch.{branch}.pushRemote"))
+        .or_else(|| get("remote.pushDefault"))
+        .or_else(|| upstream.clone())
+        .unwrap_or_else(|| "origin".to_string());
+    let merged = get(&format!("branch.{branch}.merge")).map(|name| name.trim_start_matches("refs/heads/").to_string());
+    let name = match (upstream.as_deref() == Some(remote.as_str()), merged) {
+        (true, Some(name)) => name,
+        _ => branch.to_string(),
+    };
+    (remote, name)
+}
+
+/// Get the URL for creating a PR on GitHub/GitLab, on the remote the branch is pushed to
 pub fn get_pr_url() -> Result<Option<String>> {
     let repo = Repository::open_from_env()?;
 
     // Get current branch name
     let head = repo.head()?;
-    let branch = head
+    let local = head
         .shorthand()
         .ok_or_else(|| anyhow::anyhow!("Could not get branch name"))?;
+    let (remote_name, branch) = push_target(&repo, local);
 
-    // Get remote URL
-    let remote = repo.find_remote("origin").ok();
+    // The URL pushes go to, which can differ from the one fetches come from
+    let remote = repo.find_remote(&remote_name).ok();
     let url = remote
         .as_ref()
-        .and_then(|r| r.url())
+        .and_then(|r| r.pushurl().or(r.url()))
         .unwrap_or("");
 
     if url.is_empty() {

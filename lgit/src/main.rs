@@ -380,6 +380,10 @@ async fn review_and_commit(
                     false
                 };
 
+                // Whether the push landed. None when lgit was not asked to push: the link is still
+                // worth showing then, for the push you make yourself.
+                let mut pushed: Option<bool> = None;
+
                 // Push if configured
                 if cfg.git.auto_push {
                     let push_msg = if tag_created {
@@ -395,8 +399,11 @@ async fn review_and_commit(
                         git::push()
                     };
 
-                    match push_result {
-                        Ok(true) => ui::print_success("Pushed successfully!"),
+                    pushed = Some(match push_result {
+                        Ok(true) => {
+                            ui::print_success("Pushed successfully!");
+                            true
+                        }
                         Ok(false) => {
                             // Push rejected due to remote changes, pull and retry
                             ui::print_info("Remote has new changes, pulling...");
@@ -409,20 +416,36 @@ async fn review_and_commit(
                                         git::push()
                                     };
                                     match retry_result {
-                                        Ok(true) => ui::print_success("Pushed successfully!"),
-                                        Ok(false) => ui::print_warning("Push still rejected after pull. Please resolve manually."),
-                                        Err(e) => ui::print_warning(&format!("Push failed: {e}")),
+                                        Ok(true) => {
+                                            ui::print_success("Pushed successfully!");
+                                            true
+                                        }
+                                        Ok(false) => {
+                                            ui::print_warning("Push still rejected after pull. Please resolve manually.");
+                                            false
+                                        }
+                                        Err(e) => {
+                                            ui::print_warning(&format!("Push failed: {e}"));
+                                            false
+                                        }
                                     }
                                 }
-                                Err(e) => ui::print_warning(&format!("Pull failed: {e}")),
+                                Err(e) => {
+                                    ui::print_warning(&format!("Pull failed: {e}"));
+                                    false
+                                }
                             }
                         }
-                        Err(e) => ui::print_warning(&format!("Push failed: {e}")),
-                    }
+                        Err(e) => {
+                            ui::print_warning(&format!("Push failed: {e}"));
+                            false
+                        }
+                    });
                 }
 
-                // Show PR link if configured
-                if cfg.git.pr_link {
+                // Show PR link if configured — never after a push that failed: it would point at a
+                // branch that is not there.
+                if cfg.git.pr_link && pushed != Some(false) {
                     if let Some(url) = git::get_pr_url()? {
                         ui::print_pr_link(&url);
                     }
