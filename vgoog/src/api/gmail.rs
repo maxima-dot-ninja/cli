@@ -516,6 +516,11 @@ mod tests {
         assert_eq!(encode_header("✓"), "=?UTF-8?B?4pyT?=");
     }
 
+    #[test]
+    fn draft_message_carries_thread_id() {
+        assert_eq!(draft_message("r", Some("t1"))["threadId"], "t1");
+    }
+
     fn decode(raw: &str) -> String {
         use base64::engine::general_purpose::URL_SAFE_NO_PAD;
         use base64::Engine;
