@@ -424,18 +424,24 @@ pub fn push() -> Result<bool> {
         }
 
         let retry_stderr = String::from_utf8_lossy(&retry.stderr);
-        if retry_stderr.contains("rejected") && retry_stderr.contains("fetch first") {
+        if behind_remote(&retry_stderr) {
             return Ok(false);
         }
         anyhow::bail!("git push failed: {}", retry_stderr.trim());
     }
 
     // Check if push was rejected because remote has newer commits
-    if stderr.contains("rejected") && stderr.contains("fetch first") {
+    if behind_remote(&stderr) {
         return Ok(false);
     }
 
     anyhow::bail!("git push failed: {}", stderr.trim())
+}
+
+/// Rejected because the remote has commits this branch lacks. Git says "fetch first" when it
+/// has never seen them and "non-fast-forward" when an earlier fetch already brought them in.
+fn behind_remote(stderr: &str) -> bool {
+    stderr.contains("rejected") && (stderr.contains("fetch first") || stderr.contains("non-fast-forward"))
 }
 
 /// Push to the current remote tracking branch including tags
