@@ -1,0 +1,229 @@
+#!/usr/bin/env bash
+# ship — the half of every deploy that is the same in every repo. What is staged becomes a commit
+# (lgit writes the message), the commit is pushed to GitHub, and a clean copy of exactly that commit
+# is handed to the repo's own deploy to build and ship. Nothing runs on GitHub: it only keeps the code.
+#
+# A repo's deploy script sources it, names its steps, and that is the whole script:
+#
+#   source "$(command -v ship)"
+#   ship_begin "$@"                         # commit, push, put the deploy copy at the commit
+#   ship_build bundle make_the_bundle       # local work: runs in a dry run too
+#   ship_step  fly flyctl deploy            # reaches past this Mac: skipped in a dry run
+#   ship_end
+#
+# Steps run inside the deploy copy, $SHIP_TREE, never in the checkout you work in. $SHIP_MAIN is that
+# checkout, for the ignored files a build needs from it (.env, .vercel, a linked project).
+#
+#   --dry-run   commit, push and ship nothing: show what is staged and what would go, and run the
+#               local builds, so a real deploy of the same commit reuses them
+#
+# Rerunnable: a step that succeeds is recorded against the commit in .git/ship, so a rerun after a
+# failure or a Ctrl-C does only what is left, and a rerun with nothing new says so. A step that
+# exits 75 was skipped — a tool that is not running — and is tried again by the next deploy. One
+# deploy of a repo at a time: a second refuses and names the first.
+
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then
+  sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'
+  exit 0
+fi
+
+ship_say() { printf '  %s\n' "$*"; }
+ship_die() { printf 'error: %s\n' "$*" >&2; exit 1; }
+_ship_elapsed() { local s=$(( $(date +%s) - $1 )); printf '%dm%02ds' $(( s / 60 )) $(( s % 60 )); }
+
+ship_begin() {
+  SHIP_DRY=0
+  local arg
+  for arg in "$@"; do
+    case "$arg" in
+      --dry-run) SHIP_DRY=1 ;;
+      -h|--help) sed -n '2,24p' "$(command -v ship)" | sed 's/^# \{0,1\}//'; exit 0 ;;
+      *) ship_die "unknown argument $arg" ;;
+    esac
+  done
+
+  SHIP_MAIN="$(git rev-parse --show-toplevel 2>/dev/null)" || ship_die "not inside a git repo"
+  cd "$SHIP_MAIN" || exit 1
+  SHIP_NAME="$(basename "$SHIP_MAIN")"
+  local common
+  common="$(cd "$(git rev-parse --git-common-dir)" && pwd)"
+  SHIP_STATE="$common/ship"
+  SHIP_LOCK="$common/ship.lock"
+  # Outside the repo, so nothing that walks it — tsc, Next, an editor — finds a second copy.
+  SHIP_TREE="${XDG_CACHE_HOME:-$HOME/.cache}/ship/$SHIP_NAME-$(printf '%s' "$SHIP_MAIN" | shasum | cut -c1-8)"
+  SHIP_STARTED=$(date +%s)
+  SHIP_RAN=0
+  SHIP_SKIPPED=""
+
+  _ship_lock
+  trap '_ship_unlock' EXIT
+  trap 'echo; ship_say "stopped — run the deploy again and it picks up where it stopped"; exit 130' INT TERM
+
+  # The branch GitHub calls the default — main, or master for the older repos.
+  SHIP_BRANCH="$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's#^origin/##')"
+  [ -n "$SHIP_BRANCH" ] || SHIP_BRANCH=main
+  local branch
+  branch="$(git branch --show-current)"
+  [ "$branch" = "$SHIP_BRANCH" ] || ship_die "a deploy ships $SHIP_BRANCH, and this checkout is on ${branch:-a detached HEAD}"
+
+  echo "deploy $SHIP_NAME$([ "$SHIP_DRY" -eq 1 ] && echo ' — dry run: nothing is committed, pushed or shipped')"
+  _ship_commit
+  _ship_push
+  SHIP_SHA="$(git rev-parse HEAD)"
+  ship_say "commit $(git log -1 --format='%h %s')"
+  local left
+  left="$(git status --porcelain | wc -l | tr -d ' ')"
+  [ "$left" -eq 0 ] || ship_say "$left changed or new file(s) are not staged, so they are not in this deploy"
+  _ship_tree
+}
+
+# What is staged becomes a commit, with lgit's message, accepted as written.
+_ship_commit() {
+  git diff --cached --quiet && return 0
+  if [ "$SHIP_DRY" -eq 1 ]; then
+    ship_say "would commit what is staged:"
+    git diff --cached --stat | sed 's/^/    /'
+    return 0
+  fi
+  command -v lgit >/dev/null || ship_die "lgit writes the commit message — install it: cargo install --path ~/dev/_cli/lgit"
+  local before
+  before="$(git rev-parse HEAD)"
+  ship_say "committing what is staged — lgit writes the message"
+  lgit -y || ship_die "lgit did not commit, so nothing was deployed"
+  [ "$(git rev-parse HEAD)" != "$before" ] || ship_die "lgit finished without a commit, so nothing was deployed"
+}
+
+# What is live is always a commit on GitHub, and never one that leaves out a commit someone else
+# pushed: deploying past it would take their change off the live site.
+_ship_push() {
+  local remote="origin/$SHIP_BRANCH" ahead
+  git fetch -q origin "$SHIP_BRANCH" || ship_die "could not fetch $remote from GitHub"
+  if ! git merge-base --is-ancestor "$remote" HEAD; then
+    ship_die "$remote has $(git rev-list --count "HEAD..$remote") commit(s) this checkout does not — pull them (git pull --rebase), then deploy"
+  fi
+  ahead="$(git rev-list --count "$remote..HEAD")"
+  [ "$ahead" -eq 0 ] && return 0
+  if [ "$SHIP_DRY" -eq 1 ]; then
+    ship_say "would push $ahead commit(s) to $remote"
+    return 0
+  fi
+  ship_say "pushing $ahead commit(s) to $remote"
+  git push -q origin "HEAD:$SHIP_BRANCH" || ship_die "GitHub refused the push, so nothing was deployed"
+}
+
+# The deploy copy: one worktree per repo, kept between deploys so its build caches stay warm, put
+# exactly at the commit each time. Nobody edits it, so a forced checkout and a clean make its tracked
+# files the commit's, and only ignored caches (node_modules, target, android) carry over.
+_ship_tree() {
+  git worktree prune
+  if [ ! -e "$SHIP_TREE/.git" ]; then
+    ship_say "making the deploy copy at $SHIP_TREE — its first build starts cold"
+    rm -rf "$SHIP_TREE"
+    mkdir -p "$(dirname "$SHIP_TREE")"
+    git worktree add -q --detach "$SHIP_TREE" "$SHIP_SHA" || ship_die "could not make the deploy copy at $SHIP_TREE"
+  fi
+  git -C "$SHIP_TREE" checkout -q --force --detach "$SHIP_SHA" || ship_die "could not put the deploy copy at $SHIP_SHA"
+  git -C "$SHIP_TREE" clean -q -fd
+}
+
+_ship_lock() {
+  if mkdir "$SHIP_LOCK" 2>/dev/null; then
+    echo $$ > "$SHIP_LOCK/pid"
+    return 0
+  fi
+  local pid
+  pid="$(cat "$SHIP_LOCK/pid" 2>/dev/null || true)"
+  [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null && ship_die "a deploy of $SHIP_NAME is already running (pid $pid)"
+  # The last one died without cleaning up, so its lock is taken over.
+  rm -rf "$SHIP_LOCK"
+  mkdir "$SHIP_LOCK" 2>/dev/null || ship_die "could not take the lock at $SHIP_LOCK"
+  echo $$ > "$SHIP_LOCK/pid"
+}
+
+_ship_unlock() {
+  [ "$(cat "$SHIP_LOCK/pid" 2>/dev/null)" = "$$" ] && rm -rf "$SHIP_LOCK"
+  return 0
+}
+
+_ship_done() { grep -qxF "$1 $SHIP_SHA" "$SHIP_STATE" 2>/dev/null; }
+
+_ship_record() {
+  { grep -v "^$1 " "$SHIP_STATE" 2>/dev/null || true; echo "$1 $SHIP_SHA"; } > "$SHIP_STATE.tmp" && mv "$SHIP_STATE.tmp" "$SHIP_STATE"
+}
+
+_ship_run() {
+  local name="$1" started status=0
+  shift
+  if _ship_done "$name"; then
+    ship_say "✓ $name — already done for this commit"
+    return 0
+  fi
+  SHIP_RAN=1
+  echo
+  echo "› $name"
+  started=$(date +%s)
+  # Not `( … ) || status=$?`: bash turns `set -e` off inside anything on the left of `||`, so a
+  # failed build in the middle of a step would carry on to publish whatever was lying there.
+  local errexit=""
+  case $- in *e*) errexit=1 ;; esac
+  set +e
+  ( set -e; cd "$SHIP_TREE"; "$@" )
+  status=$?
+  [ -n "$errexit" ] && set -e
+  if [ "$status" -eq 75 ]; then
+    SHIP_SKIPPED="$SHIP_SKIPPED $name"
+    ship_say "– $name skipped — the next deploy tries it again"
+    return 0
+  fi
+  [ "$status" -eq 0 ] || ship_die "$name failed after $(_ship_elapsed "$started") — run the deploy again and it starts here"
+  _ship_record "$name"
+  ship_say "✓ $name in $(_ship_elapsed "$started")"
+}
+
+# Local work — a build, a bundle. Runs in a dry run too, so the real deploy reuses it.
+ship_build() { _ship_run "$@"; }
+
+# Anything that reaches past this Mac — a migration, a deploy, an upload, an install.
+ship_step() {
+  if [ "$SHIP_DRY" -eq 1 ]; then
+    _ship_done "$1" && ship_say "✓ $1 — already done for this commit" || ship_say "would run: $1"
+    return 0
+  fi
+  _ship_run "$@"
+}
+
+ship_end() {
+  echo
+  [ -n "$SHIP_SKIPPED" ] && ship_say "skipped, so not live yet:$SHIP_SKIPPED"
+  if [ "$SHIP_DRY" -eq 1 ]; then
+    echo "✓ $SHIP_NAME — dry run done in $(_ship_elapsed "$SHIP_STARTED"); nothing was committed, pushed or shipped"
+    return 0
+  fi
+  if [ "$SHIP_RAN" -eq 0 ]; then
+    echo "✓ $SHIP_NAME — nothing new: $(git rev-parse --short "$SHIP_SHA") is already live"
+    return 0
+  fi
+  echo "✓ $SHIP_NAME — $(git rev-parse --short "$SHIP_SHA") deployed in $(_ship_elapsed "$SHIP_STARTED")"
+}
+
+# Shared by the Node repos: the deploy copy's node_modules, installed again only when
+# package-lock.json changed — `npm ci` takes a minute, and most deploys change no dependency.
+ship_npm() {
+  local want
+  want="$(shasum package-lock.json | cut -c1-40)"
+  if [ "$(cat node_modules/.ship-lock 2>/dev/null)" = "$want" ]; then
+    ship_say "dependencies unchanged"
+    return 0
+  fi
+  npm ci --no-audit --no-fund && echo "$want" > node_modules/.ship-lock
+}
+
+# An ignored file the build needs, brought over from the checkout you work in.
+ship_bring() {
+  local path
+  for path in "$@"; do
+    [ -e "$SHIP_MAIN/$path" ] || ship_die "the build needs $path, and $SHIP_MAIN has none"
+    mkdir -p "$(dirname "$path")"
+    cp -R "$SHIP_MAIN/$path" "$(dirname "$path")/"
+  done
+}

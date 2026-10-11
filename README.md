@@ -1,6 +1,6 @@
 # _cli
 
-Personal command-line tools. One repo, eight independent tools, no shared build.
+Personal command-line tools. One repo, nine independent tools, no shared build.
 
 | Tool | What it does | Stack | Skill |
 |---|---|---|---|
@@ -12,6 +12,7 @@ Personal command-line tools. One repo, eight independent tools, no shared build.
 | [**phog**](phog/README.md) | PostHog — HogQL, people by fingerprint, dashboards as files | Rust | ✅ |
 | [**lgit**](lgit/README.md) | AI-written commit messages, and a plain-English `status` | Rust | — |
 | [**ccx**](ccx/README.md) | Claude Code launcher whose sessions delete themselves on exit, unless you pass `--persist` | Bash | — |
+| [**ship**](ship/README.md) | The shared half of every repo's deploy: commit what is staged, push, build from a clean copy of the commit — no GitHub Actions | Bash | — |
 
 Each tool stands alone — install only what you want.
 
