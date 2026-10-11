@@ -16,6 +16,8 @@
 #
 #   --dry-run   commit, push and ship nothing: show what is staged and what would go, and run the
 #               local builds, so a real deploy of the same commit reuses them
+#   --mac       build and ship only what runs on a Mac; a repo with nothing else to build ignores
+#               it. Sets SHIP_MAC=1 for the repo's script to read
 #
 # Rerunnable: a step that succeeds is recorded against the commit in .git/ship, so a rerun after a
 # failure or a Ctrl-C does only what is left, and a rerun with nothing new says so. A step that
@@ -23,7 +25,7 @@
 # deploy of a repo at a time: a second refuses and names the first.
 
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then
-  sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,26p' "$0" | sed 's/^# \{0,1\}//'
   exit 0
 fi
 
@@ -33,11 +35,13 @@ _ship_elapsed() { local s=$(( $(date +%s) - $1 )); printf '%dm%02ds' $(( s / 60 
 
 ship_begin() {
   SHIP_DRY=0
+  SHIP_MAC=0
   local arg
   for arg in "$@"; do
     case "$arg" in
       --dry-run) SHIP_DRY=1 ;;
-      -h|--help) sed -n '2,24p' "$(command -v ship)" | sed 's/^# \{0,1\}//'; exit 0 ;;
+      --mac) SHIP_MAC=1 ;;
+      -h|--help) sed -n '2,26p' "$(command -v ship)" | sed 's/^# \{0,1\}//'; exit 0 ;;
       *) ship_die "unknown argument $arg" ;;
     esac
   done
@@ -66,7 +70,7 @@ ship_begin() {
   branch="$(git branch --show-current)"
   [ "$branch" = "$SHIP_BRANCH" ] || ship_die "a deploy ships $SHIP_BRANCH, and this checkout is on ${branch:-a detached HEAD}"
 
-  echo "deploy $SHIP_NAME$([ "$SHIP_DRY" -eq 1 ] && echo ' — dry run: nothing is committed, pushed or shipped')"
+  echo "deploy $SHIP_NAME$([ "$SHIP_MAC" -eq 1 ] && echo ' — the Mac builds only')$([ "$SHIP_DRY" -eq 1 ] && echo ' — dry run: nothing is committed, pushed or shipped')"
   _ship_commit
   _ship_push
   SHIP_SHA="$(git rev-parse HEAD)"

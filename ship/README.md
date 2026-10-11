@@ -32,6 +32,12 @@ Nothing runs on GitHub. It only keeps the code.
 Commits, pushes and ships nothing. It shows what is staged and what would go out, and runs the
 local builds, so a real deploy of the same commit afterwards reuses them.
 
+## `--mac`
+
+Builds and ships only what runs on a Mac. vaulty then builds its two Mac targets and leaves Linux and
+the Raspberry Pis alone, and Studio skips its Linux `.deb`; a repo with nothing else to build ignores
+it. A repo's script reads it as `SHIP_MAC=1`. The builds it leaves out stay as last published.
+
 ## Writing a repo's deploy
 
 ```bash
