@@ -2,10 +2,42 @@ use crate::auth::ensure_token;
 use crate::config::{Config, SingleAccountConfig};
 use crate::error::{Result, VgoogError};
 use crate::tier::{self, Tier};
-use reqwest::{Client, Method, Response};
+use reqwest::header::{CONTENT_LENGTH, CONTENT_TYPE};
+use reqwest::multipart::{Form, Part};
+use reqwest::{Client, Method, RequestBuilder, Response};
 use serde_json::Value;
 use std::sync::Arc;
 use tokio::sync::Mutex;
+
+/// Methods that carry content, so their requests always say how long it is — zero included.
+const WITH_CONTENT: [Method; 3] = [Method::POST, Method::PUT, Method::PATCH];
+
+/// Every API request is built here. Google answers a POST that does not state its length with
+/// 411 Length Required, and reqwest states none when there is no body — so `trash_thread`,
+/// `untrash_message` and every other body-less POST failed that way. The body is encoded up front
+/// and its length always sent, so nothing ever goes out chunked or unmeasured.
+fn build(http: &Client, method: Method, url: &str, token: &str, body: Option<&Value>) -> Result<RequestBuilder> {
+    let req = http.request(method.clone(), url).bearer_auth(token);
+    if let Some(b) = body {
+        let bytes = serde_json::to_vec(b)?;
+        return Ok(req
+            .header(CONTENT_TYPE, "application/json")
+            .header(CONTENT_LENGTH, bytes.len())
+            .body(bytes));
+    }
+    if !WITH_CONTENT.contains(&method) {
+        return Ok(req);
+    }
+    Ok(req.header(CONTENT_LENGTH, 0))
+}
+
+/// Drive's multipart upload. Every part is in memory, so reqwest can measure the form and sends
+/// its `Content-Length` instead of chunking it — the test below holds it to that.
+fn upload_form(metadata: &Value, file_bytes: Vec<u8>, mime_type: &str) -> Result<Form> {
+    let metadata_part = Part::text(serde_json::to_string(metadata)?).mime_str("application/json")?;
+    let file_part = Part::bytes(file_bytes).mime_str(mime_type)?;
+    Ok(Form::new().part("metadata", metadata_part).part("file", file_part))
+}
 
 /// Tries at a rate-limited call, waiting 1, 2, 4, 8 then 16 s between them — about half a minute,
 /// inside the 2 minutes an agent's `google` call is given.
@@ -172,10 +204,7 @@ impl GoogleClient {
         let mut attempt = 1;
         loop {
             let token = self.authorize(url).await?;
-            let mut req = self.http.request(method.clone(), url).bearer_auth(&token);
-            if let Some(b) = body {
-                req = req.json(b);
-            }
+            let req = build(&self.http, method.clone(), url, &token, body)?;
             let result = self.handle_response(req.send().await?).await;
             if attempt >= RATE_ATTEMPTS || !rate_limited(&result) {
                 return result;
@@ -214,13 +243,7 @@ impl GoogleClient {
         mime_type: &str,
     ) -> Result<Value> {
         let token = self.authorize(url).await?;
-        let metadata_part = reqwest::multipart::Part::text(serde_json::to_string(metadata)?)
-            .mime_str("application/json")?;
-        let file_part = reqwest::multipart::Part::bytes(file_bytes).mime_str(mime_type)?;
-        let form = reqwest::multipart::Form::new()
-            .part("metadata", metadata_part)
-            .part("file", file_part);
-
+        let form = upload_form(metadata, file_bytes, mime_type)?;
         let resp = self
             .http
             .post(url)
@@ -248,8 +271,90 @@ impl GoogleClient {
     }
 
     pub async fn post_empty(&self, url: &str) -> Result<Value> {
-        let token = self.authorize(url).await?;
-        let resp = self.http.post(url).bearer_auth(&token).send().await?;
-        self.handle_response(resp).await
+        self.request(Method::POST, url, None).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+    use std::io::{Read, Write};
+    use std::net::{TcpListener, TcpStream};
+
+    /// Read one request off the socket: its head, lowercased, and its body.
+    fn read_request(stream: &mut TcpStream) -> (String, Vec<u8>) {
+        let mut seen = Vec::new();
+        let mut buf = [0u8; 4096];
+        let head_end = loop {
+            if let Some(i) = seen.windows(4).position(|w| w == b"\r\n\r\n") {
+                break i + 4;
+            }
+            let n = stream.read(&mut buf).unwrap();
+            assert!(n > 0, "connection closed before the head ended");
+            seen.extend_from_slice(&buf[..n]);
+        };
+        let head = String::from_utf8_lossy(&seen[..head_end]).to_lowercase();
+        let length: usize = head
+            .lines()
+            .find_map(|line| line.strip_prefix("content-length: "))
+            .map_or(0, |v| v.trim().parse().unwrap());
+        while seen.len() < head_end + length {
+            let n = stream.read(&mut buf).unwrap();
+            assert!(n > 0, "connection closed before the body ended");
+            seen.extend_from_slice(&buf[..n]);
+        }
+        (head, seen[head_end..].to_vec())
+    }
+
+    /// Send one request to a local socket and return it as it arrived. What reqwest was asked to
+    /// send is not the point — what Google receives is.
+    async fn on_the_wire(make: impl FnOnce(&str) -> RequestBuilder) -> (String, Vec<u8>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/gmail/v1/users/me/threads/t1/trash", listener.local_addr().unwrap());
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let request = read_request(&mut stream);
+            stream.write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 2\r\n\r\n{}").unwrap();
+            request
+        });
+        let resp = make(&url).send().await.unwrap();
+        assert!(resp.status().is_success());
+        server.join().unwrap()
+    }
+
+    #[tokio::test]
+    async fn bodyless_post_states_a_zero_length() {
+        let (head, body) = on_the_wire(|url| build(&Client::new(), Method::POST, url, "t", None).unwrap()).await;
+        assert!(head.contains("\r\ncontent-length: 0\r\n"), "{head}");
+        assert!(body.is_empty());
+    }
+
+    #[tokio::test]
+    async fn json_post_states_its_exact_length() {
+        let sent = json!({ "addLabelIds": ["TRASH"], "removeLabelIds": ["INBOX"] });
+        let expected = serde_json::to_vec(&sent).unwrap().len();
+        let (head, body) = on_the_wire(|url| build(&Client::new(), Method::POST, url, "t", Some(&sent)).unwrap()).await;
+        assert!(head.contains(&format!("\r\ncontent-length: {expected}\r\n")), "{head}");
+        assert!(!head.contains("transfer-encoding"), "{head}");
+        assert_eq!(serde_json::from_slice::<Value>(&body).unwrap(), sent);
+    }
+
+    #[tokio::test]
+    async fn get_states_no_length() {
+        let (head, _) = on_the_wire(|url| build(&Client::new(), Method::GET, url, "t", None).unwrap()).await;
+        assert!(!head.contains("content-length"), "{head}");
+    }
+
+    #[tokio::test]
+    async fn multipart_upload_is_measured_not_chunked() {
+        let (head, body) = on_the_wire(|url| {
+            let form = upload_form(&json!({ "name": "a.txt" }), b"hello".to_vec(), "text/plain").unwrap();
+            Client::new().post(url).multipart(form)
+        })
+        .await;
+        assert!(head.contains("\r\ncontent-length: "), "{head}");
+        assert!(!head.contains("transfer-encoding"), "{head}");
+        assert!(body.windows(5).any(|w| w == b"hello"));
     }
 }
