@@ -1,6 +1,7 @@
 mod ai;
 mod config;
 mod git;
+mod pr;
 mod providers;
 mod setup;
 mod status;
@@ -64,11 +65,23 @@ enum Command {
     /// Explain in plain English what's going on in this repo: what you're in
     /// the middle of, what could bite you, and what to do next
     Status,
+    /// Pull requests on GitHub, answered as JSON: list them, read one's diff, merge one.
+    /// Runs as whoever `gh` is logged in as.
+    Pr {
+        #[command(subcommand)]
+        command: pr::PrCommand,
+    },
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
+
+    // Before anything that could ask a question: Vaulty runs these from launchd, where
+    // the setup wizard would wait forever on a keyboard nobody is at.
+    if let Some(Command::Pr { command }) = &cli.command {
+        std::process::exit(pr::run(command).await);
+    }
 
     // Handle --config flag
     if cli.config {

@@ -18,6 +18,7 @@ AI-powered git commits. Stage your changes, let AI write the message.
 - **PR link generation** — Get a quick link to create a PR on GitHub/GitLab
 - **Many repos at once** — `lgit --root` stages and commits every repo in a folder, with all the messages written in parallel
 - **Plain-English status** — `lgit status` tells you what you're in the middle of, what could bite you, and what to do next
+- **Pull requests as JSON** — `lgit pr` lists open pull requests, reads one's diff and merges one, as your `gh` login. Vaulty's PR review runs on it
 
 ## Installation
 
@@ -232,6 +233,50 @@ in sync gets a one-line answer and no model call at all.
 Untracked files whose names look like secrets (`.env`, `*.pem`, `id_rsa`, and
 so on) are listed by name only. Their contents are never sent to the model.
 
+### Pull requests
+
+`lgit pr` is for programs rather than people: Vaulty's PR review lists, reads and
+merges through it. Every answer is one JSON document on stdout and nothing goes to
+stderr. It runs `gh`, so it reads and merges as whoever `gh` is logged in as, and it
+never runs the setup wizard or needs a model.
+
+```bash
+lgit pr list <owner/name>... [--diffs]          # the open pull requests on each repo
+lgit pr diff <owner/name> <number>              # one's files at its head, and whether it would merge
+lgit pr merge <owner/name> <number> [--sha <head>] [--method squash|merge|rebase]
+```
+
+Each takes `--timeout-ms` (20 seconds by default) as the budget for the whole
+command, not for each call it makes. A repo can be `owner/name` or any GitHub url.
+
+`list` reads every repo in one GraphQL call. Each repo answers `repo`, `url`,
+`default_branch`, `merge_method` (what a merge would use) and `prs`, or `error` when
+GitHub would not answer for it. Each pull request carries `number`, `title`, `url`,
+`body`, `author` (`login`, `avatar_url`), `head`, `base`, `head_sha`, `draft`,
+`labels`, `additions`, `deletions`, `changed_files`, `created_at` and `updated_at`.
+`--diffs` adds each one's `files`, six fetched at a time. Whether a pull request can
+merge is left out on purpose: on cli/cli's fifty open pull requests it took the call
+from 1 second to 8.
+
+`diff` answers `repo`, `number`, `head_sha`, `base`, `merge` and `files`. `merge` is
+`{ ok, method }`, or `{ ok: false, reason, error }` in the same words `lgit pr merge`
+would refuse with. Each file is `path`, `previous_path` (after a rename), `status`
+(added, deleted, renamed, copied or modified), `binary`, `additions`, `deletions` and
+`patch`, which is its hunks with the file headers taken off. The diff is read at
+`head_sha` exactly, so passing that sha to `merge --sha` merges what you read.
+
+`merge` squashes when the repo allows it, using the commit message GitHub's own
+button would offer you. It reads the pull request first and refuses, exiting 1,
+rather than ever retrying. A refusal is `{ "merged": false, "reason", "error" }`,
+and `reason` is one of `draft`, `conflicts`, `unknown` (GitHub is still working it
+out), `checks_failing`, `checks_pending`, `changes_requested`, `review_required`,
+`blocked`, `behind`, `closed`, `head_changed` (someone pushed after `--sha`),
+`method_not_allowed`, `not_mergeable`, `merge_queue`, `no_permission`, `not_found`,
+`timed_out` or `gh_failed`. A merge answers
+`{ "merged": true, "already": false, "method", "sha", "url", "merged_by" }`. A pull
+request that is already merged answers merged with `"already": true`, so running it
+twice is safe.
+
 ### Commands
 
 ```bash
@@ -247,6 +292,9 @@ lgit --model          # Change AI model (can switch providers)
 lgit --key            # Manage API keys
 lgit --config         # Show current configuration
 lgit --gpginfo        # Show GPG key setup instructions
+lgit pr list <repo>   # Open pull requests as JSON (see Pull requests)
+lgit pr diff <repo> <n>   # One pull request's files and whether it would merge
+lgit pr merge <repo> <n>  # Merge one as your gh login, or say why not
 lgit --version        # Print the version
 ```
 
