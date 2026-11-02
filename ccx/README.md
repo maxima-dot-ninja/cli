@@ -1,7 +1,7 @@
 # ccx
 
-**ccx is how you start Claude Code every day.** It runs `claude` on Opus 5.5 at xhigh effort, in auto permission mode, with
-remote control on. **By default every session is a ghost**, which means it is deleted, with every
+**ccx is how you start Claude Code every day.** It runs `claude` on Opus 5.5 at xhigh effort, in auto permission mode.
+Remote Control is off, so no session is opened to claude.ai/code. **By default every session is a ghost**, which means it is deleted, with every
 trace of it, as soon as Claude exits. `ccx --persist` keeps sessions instead: it picks up the
 folder's last session that is no longer running, or starts a new kept one named after the folder.
 A few subcommands list, summarize and delete kept sessions. ccx is one bash script, and it lives in
@@ -32,7 +32,7 @@ when `--resume` or `--continue` comes with the `--session-id` ccx passes, so use
 until Claude exits:
 
 ```sh
-claude --model claude-opus-5-5 --effort xhigh --permission-mode auto --remote-control NAME --name NAME --session-id ID --settings HOOK [your args]
+claude --model claude-opus-5-5 --effort xhigh --permission-mode auto --name NAME --session-id ID --settings HOOK [your args]
 ```
 
 The name is the folder's base name with `-ghost` and a counter, such as `dev-cli-ghost-000`. It
@@ -73,7 +73,7 @@ anything else. A session on such a list that a live Claude still holds is report
 `(running, kept)`, and its list stays until a later run finds it ended. `ccx --persist` also never
 resumes a session that a running ghost has on its list.
 
-Remote Control stays on, as with every ccx launch, and ccx only deletes what is on this machine.
+ccx only deletes what is on this machine.
 
 ## What `ccx --persist` does
 
@@ -90,8 +90,8 @@ whose session id appears in one of them. A session sitting idle in another termi
 running, so ccx never resumes it out from under that terminal. The check covers every running
 Claude on the machine, not only the ones in this folder.
 
-When ccx finds a session, it resumes it **under that session's own title**, so the Remote Control
-name matches what the `/resume` picker shows. A session started by plain `claude` has no title, and
+When ccx finds a session, it resumes it **under that session's own title**, so the prompt box
+shows the name the `/resume` picker does. A session started by plain `claude` has no title, and
 ccx gives it a fresh name the same way it names a new session. When nothing is left to resume, ccx
 starts a new kept session.
 
@@ -110,31 +110,25 @@ launches run one of these three command lines, and your own arguments always go 
 
 ```sh
 # resuming an ended session
-claude --model claude-opus-5-5 --effort xhigh --permission-mode auto --remote-control NAME --name NAME --resume SESSION_ID [your args]
+claude --model claude-opus-5-5 --effort xhigh --permission-mode auto --name NAME --resume SESSION_ID [your args]
 
 # starting a new session
-claude --model claude-opus-5-5 --effort xhigh --permission-mode auto --remote-control NAME --name NAME [your args]
+claude --model claude-opus-5-5 --effort xhigh --permission-mode auto --name NAME [your args]
 
 # starting a new session when you passed -n, --name or --name=...
-claude --model claude-opus-5-5 --effort xhigh --permission-mode auto --remote-control [your args]
+claude --model claude-opus-5-5 --effort xhigh --permission-mode auto [your args]
 ```
 
 `--model claude-opus-5-5 --effort xhigh` pins the model and the effort level. Because your
 arguments come last, passing your own `--model` or `--effort` overrides them.
 `--permission-mode auto` lets a classifier approve safe actions on its own and stop to ask before
-risky ones, instead of skipping every check. `--remote-control NAME` opens
-the session to Remote Control under the same name that `--name` puts in the prompt box, the
-`/resume` picker and the terminal title.
+risky ones, instead of skipping every check. `--name NAME` puts the session's name in the prompt
+box, the `/resume` picker and the terminal title.
 
 **Arguments you give `ccx --persist` go to the resumed session** when there is one, because they
 land after `--resume`. Use `ccx new` when you want them on a fresh session instead. Any first word
 that is not a subcommand counts as a `claude` argument, so a typo such as `ccx detail` starts a
 ghost and hands it `detail` as a prompt.
-
-With your own `--name`, ccx passes `--remote-control` with no value, so Claude Code picks the
-Remote Control name itself. `--remote-control` takes an optional value, so **put a flag first** in
-that case: in `ccx new "fix the build" --name build`, Claude reads `fix the build` as the Remote
-Control name.
 
 ## How sessions are named
 
@@ -157,8 +151,7 @@ fills the gap, because ccx always takes the lowest free number.
 
 Titles can still end up shared, because ccx only checks when it picks a name. A `/rename` can set
 any title, for example. A resume keeps the transcript's title without checking it, so resuming a
-session whose title a running session also holds gives two live sessions the same Remote Control
-name. `cleanup` is the command meant to fix shared titles, but it is broken.
+session whose title a running session also holds gives two live sessions the same name. `cleanup` is the command meant to fix shared titles, but it is broken.
 
 Picking a fresh name costs **one scan of every transcript**, and that wait comes before Claude
 starts. With 303 transcripts totalling about 313 MB, the scan takes about **2.5 seconds**. Resuming

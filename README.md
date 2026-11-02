@@ -204,7 +204,7 @@ Full docs: [lgit/README.md](lgit/README.md).
 
 ## ccx
 
-Launches Claude Code on Opus 5.5 at xhigh effort, in auto permission mode, with Remote Control on.
+Launches Claude Code on Opus 5.5 at xhigh effort, in auto permission mode. Remote Control is off.
 By default every session is a **ghost**: it is deleted, with every trace of it, as soon as Claude
 exits. `ccx --persist` keeps sessions instead, and names each new one after its folder, so
 parallel sessions are easy to tell apart.
