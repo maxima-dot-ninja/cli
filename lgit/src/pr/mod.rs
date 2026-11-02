@@ -52,6 +52,9 @@ pub enum PrCommand {
         /// squash, merge or rebase. Squash by default when the repo allows it.
         #[arg(long, value_parser = ["squash", "merge", "rebase"])]
         method: Option<String>,
+        /// Merge past the branch rules, as an admin: failing or running checks, a review the rules want, a block, a branch behind its base. GitHub still decides, by this login's bypass rights. A draft, a conflict or a moved head still refuses.
+        #[arg(long)]
+        admin: bool,
         #[arg(long, default_value_t = TIMEOUT_MS)]
         timeout_ms: u64,
     },
@@ -76,9 +79,9 @@ async fn answer(command: &PrCommand) -> Result<Value, Failure> {
             let (owner, name) = parse_repo(repo)?;
             diff::fetch(&gh(*timeout_ms)?, &owner, &name, *number).await
         }
-        PrCommand::Merge { repo, number, sha, method, timeout_ms } => {
+        PrCommand::Merge { repo, number, sha, method, admin, timeout_ms } => {
             let (owner, name) = parse_repo(repo)?;
-            let ask = merge::Ask { owner: &owner, name: &name, number: *number, sha: sha.as_deref(), method: method.as_deref() };
+            let ask = merge::Ask { owner: &owner, name: &name, number: *number, sha: sha.as_deref(), method: method.as_deref(), admin: *admin };
             merge::run(&gh(*timeout_ms)?, ask).await
         }
     }

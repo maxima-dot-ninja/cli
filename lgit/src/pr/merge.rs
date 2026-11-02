@@ -6,6 +6,14 @@
 //! `expectedHeadOid`, so a push in between makes GitHub refuse it rather than merge
 //! code nobody looked at. It never retries. A pull request that is already merged
 //! answers merged, with its merge commit, so running it twice is safe.
+//!
+//! `--admin` is GitHub's "Merge without waiting for requirements to be met (bypass
+//! rules)". It skips the refusals a repo admin may bypass — failing or running checks,
+//! a review the rules want, a block, a branch behind its base — and sends the same
+//! merge, which GitHub then takes or refuses by this login's bypass rights. That is all
+//! `gh pr merge --admin` does too: cli/cli sends no header and no extra field, it only
+//! stops refusing BLOCKED and BEHIND on its own side. A draft, a conflict, a closed
+//! pull request and a moved head still refuse: no right bypasses those.
 
 use super::gh::{default_method, Failure, Gh, METHOD_FIELDS};
 use serde_json::{json, Value};
@@ -32,6 +40,8 @@ pub struct Ask<'a> {
     pub number: u64,
     pub sha: Option<&'a str>,
     pub method: Option<&'a str>,
+    /// Merge past the branch rules, as GitHub's bypass does for an admin.
+    pub admin: bool,
 }
 
 /// One refusal: the test, its reason code and what it says. Checked in order; the first
@@ -52,6 +62,14 @@ const RULES: &[Rule] = &[
     (|pr| pr["mergeStateStatus"] == "BEHIND", "behind", "Its branch is behind the base, and the repo wants it up to date first."),
 ];
 
+/// The refusals `--admin` skips: the ones GitHub's bypass lets an admin merge through.
+/// Every other rule holds whatever is asked.
+const BYPASSABLE: &[&str] = &["checks_failing", "checks_pending", "changes_requested", "review_required", "blocked", "behind"];
+
+fn bypassable(reason: &str) -> bool {
+    BYPASSABLE.contains(&reason)
+}
+
 fn checks(pr: &Value) -> &str {
     pr["commits"]["nodes"][0]["commit"]["statusCheckRollup"]["state"].as_str().unwrap_or_default()
 }
@@ -60,20 +78,25 @@ fn blocked(pr: &Value) -> bool {
     pr["mergeStateStatus"] == "BLOCKED"
 }
 
-/// Why GitHub would refuse to merge it right now, or nothing when it would merge.
-fn verdict(pr: &Value) -> Option<Failure> {
-    RULES.iter().find(|(test, _, _)| test(pr)).map(|(_, reason, why)| Failure::new(reason, *why))
+/// Why GitHub would refuse to merge it right now, or nothing when it would merge. With
+/// `admin`, the bypassable rules are not asked, so only a refusal no right can bypass holds.
+fn verdict(pr: &Value, admin: bool) -> Option<Failure> {
+    let asked = RULES.iter().filter(|(_, reason, _)| !(admin && bypassable(reason)));
+    asked.into_iter().find(|(test, _, _)| test(pr)).map(|(_, reason, why)| Failure::new(reason, *why))
 }
 
 /// What the Merge button shows before anyone presses it: whether it would merge and with
-/// which method, or why not, in the same words `lgit pr merge` would refuse with.
+/// which method, or why not, in the same words `lgit pr merge` would refuse with. A
+/// refusal says `admin: true` when `--admin` would merge through it anyway.
 pub fn readiness(repo: &Value, pr: &Value) -> Value {
     let method = default_method(repo);
-    let refusal = verdict(pr).or_else(|| method.is_none().then(no_method));
-    match refusal {
-        None => json!({ "ok": true, "method": method }),
-        Some(failure) => json!({ "ok": false, "method": method, "reason": failure.reason, "error": failure.error }),
+    let refusal = verdict(pr, false).or_else(|| method.is_none().then(no_method));
+    let Some(failure) = refusal else { return json!({ "ok": true, "method": method }) };
+    let mut out = json!({ "ok": false, "method": method, "reason": failure.reason, "error": failure.error });
+    if method.is_some() && bypassable(failure.reason) {
+        out["admin"] = json!(true);
     }
+    out
 }
 
 fn no_method() -> Failure {
@@ -98,7 +121,7 @@ pub async fn run(gh: &Gh, ask: Ask<'_>) -> Result<Value, Failure> {
     if ask.sha.is_some_and(|sha| sha != head) {
         return Err(Failure::new("head_changed", "Someone pushed to it since you looked. Read the new diff first."));
     }
-    if let Some(failure) = verdict(pr) {
+    if let Some(failure) = verdict(pr, ask.admin) {
         return Err(failure);
     }
     let method = pick(repo, ask.method)?;

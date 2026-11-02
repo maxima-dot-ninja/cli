@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# ccx — claude on Opus 5.5 at xhigh effort, in auto permission mode, with
-# remote control on. By default the session is a ghost: it is deleted, with
-# every trace of it, as soon as claude exits. --persist and new keep it.
+# ccx — claude on Opus 5.5 at xhigh effort, in auto permission mode. By
+# default the session is a ghost: it is deleted, with every trace of it, as
+# soon as claude exits. --persist and new keep it.
 #
 # Names a kept session after the last two path components plus a counter, so
 # dev/_www/croissant/api becomes croissant-api-000, and the next session in the
@@ -33,7 +33,8 @@ GHOSTS="$HOME/.config/ccx/ghosts"
 
 # Every launch starts with these. The caller's args go last, so a --model or
 # --effort passed to ccx wins over the defaults here.
-CLAUDE=(claude --model claude-opus-5-5 --effort xhigh --permission-mode auto --remote-control)
+# Remote Control is off: sessions are not opened to claude.ai/code (2026-10-31).
+CLAUDE=(claude --model claude-opus-5-5 --effort xhigh --permission-mode auto)
 
 slug() {
   printf '%s' "$1" |
@@ -297,8 +298,8 @@ last_ended() {
   done | sort | tail -1 | cut -d' ' -f2
 }
 
-# Resumes under the session's own title, so the remote-control name matches
-# the /resume picker. A session started by plain claude has no title and gets
+# Resumes under the session's own title, so the prompt box shows the name the
+# /resume picker does. A session started by plain claude has no title and gets
 # a fresh one the same way a new ccx session would. Returns only when there is
 # nothing to resume.
 resume_last() {
@@ -307,7 +308,7 @@ resume_last() {
   [ -n "$id" ] || return
   name=$(title_of "$(project_dir "$(pwd -P)")/$id.jsonl")
   name=${name:-$(pick_name "$(base_name)" "$(taken_names)")}
-  exec "${CLAUDE[@]}" "$name" --name "$name" --resume "$id" "$@"
+  exec "${CLAUDE[@]}" --name "$name" --resume "$id" "$@"
 }
 
 has_name() {
@@ -323,7 +324,7 @@ start_new() {
   local name
   has_name "$@" && exec "${CLAUDE[@]}" "$@"
   name=$(pick_name "$(base_name)" "$(taken_names)")
-  exec "${CLAUDE[@]}" "$name" --name "$name" "$@"
+  exec "${CLAUDE[@]}" --name "$name" "$@"
 }
 
 # Resumes the last ended session of cwd, or starts a new kept one when there
@@ -424,7 +425,7 @@ ghost() {
   args=(--session-id "$id" --settings "$(ghost_hook "$list")")
   if ! has_name "$@"; then
     name=$(pick_name "$(base_name)-ghost" "$(live_field name)")
-    args=("$name" --name "$name" "${args[@]}")
+    args=(--name "$name" "${args[@]}")
   fi
   "${CLAUDE[@]}" "${args[@]}" "$@"
 }

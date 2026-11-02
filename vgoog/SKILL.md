@@ -13,11 +13,11 @@ tools:
       an object. Returns JSON. If you are not certain of the exact action name or the arguments it
       takes, call google_actions FIRST — guessing an action name wastes a turn.
       A reply to an email is `draft_reply`, never gmail create_draft / update_draft.
-    argv: [exec, "{{service}}", "{{action}}", "{{args?}}", [--account, "{{account?}}"]]
+    argv: [exec, "{{service}}", "{{action}}", "{{args}}", [--account, "{{account?}}"]]
     timeout_ms: 120000
     input:
       type: object
-      required: [service, action]
+      required: [service, action, args]
       properties:
         service:
           type: string
@@ -28,7 +28,8 @@ tools:
           description: snake_case action name, exactly as google_actions lists it
         args:
           type: object
-          description: the action's arguments, as an object
+          description: >
+            the action's arguments, as an object — `{}` when the action takes none
         account:
           type: string
           description: >
