@@ -17,6 +17,7 @@ AI-powered git commits. Stage your changes, let AI write the message.
 - **Auto push with smart retry** — Automatically pulls and retries if remote has new commits
 - **PR link generation** — Get a quick link to create a PR on GitHub/GitLab
 - **Many repos at once** — `lgit --root` stages and commits every repo in a folder, with all the messages written in parallel
+- **Pull everything** — `lgit pull` pulls the branch you are on; `lgit root pull` pulls every repo in a folder at once
 - **Plain-English status** — `lgit status` tells you what you're in the middle of, what could bite you, and what to do next
 - **Pull requests as JSON** — `lgit pr` lists open pull requests, reads one's diff and merges one, as your `gh` login. Vaulty's PR review runs on it
 
@@ -169,6 +170,30 @@ It looks **one level down** only, so neither the folder itself nor repos nested 
 are included, while a worktree (a folder with a `.git` file) counts. Adding `--tag`
 tags every repo that gets committed.
 
+`lgit root …` is the same as `lgit --root …`, so `lgit root` commits every repo and
+`lgit root pull` pulls every one.
+
+### Pulling
+
+`lgit pull` runs `git pull` on the branch you are on, from anywhere inside the repo, and
+says how many commits came in. `lgit root pull` does it for every repo one level below
+the current folder, all at once, each on its own branch. Each repo prints a line the
+moment it finishes, and a summary closes it:
+
+```
+✓ api  ↓ 3 commits on main
+· studio  up to date on main
+– local-only  main has no upstream to pull from
+✗ web  your uncommitted changes would be overwritten — commit or stash them first
+1 updated · 1 up to date · 1 skipped · 1 failed
+```
+
+It is git's own pull, so `pull.rebase` and the rest of your git config decide how it
+lands. A repo that would need a login fails and says so rather than waiting on a prompt,
+and a merge commit keeps git's message rather than opening an editor. A repo that fails
+is left exactly as it was. The exit code is 1 when any repo failed. It needs no AI
+setup.
+
 `--root` works with `status` too: `lgit status --root` explains every repo in the
 folder, using the same one-level-down rule so the two commands never disagree about
 which repos a folder holds. Reading each repo is quick and happens up front; the model
@@ -287,6 +312,8 @@ lgit --tag v1.0.0     # Commit, then tag it
 lgit -y               # Commit without asking: accept the message, sign with the first key
 lgit --root           # Commit every repo in this folder, one after another
 lgit --root -y        # Commit every repo in this folder without asking
+lgit pull             # Pull the branch you are on
+lgit root pull        # Pull every repo in this folder at once (also lgit --root pull)
 lgit --setup          # Re-run setup wizard
 lgit --model          # Change AI model (can switch providers)
 lgit --key            # Manage API keys

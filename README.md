@@ -195,6 +195,8 @@ local Ollama, and it can sign commits with GPG.
 ```sh
 git add -A && lgit    # write the message for what's staged, then commit and push
 lgit status           # what's going on here, what could bite you, what to do next
+lgit pull             # pull the branch you are on
+lgit root pull        # pull every repo in this folder at once
 lgit --root           # commit every repo in this folder, messages written in parallel
 lgit --tag v1.0.0     # commit, then tag and push the tag
 lgit --model          # switch provider or model

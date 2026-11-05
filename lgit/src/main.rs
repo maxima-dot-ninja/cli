@@ -3,6 +3,7 @@ mod config;
 mod git;
 mod pr;
 mod providers;
+mod pull;
 mod setup;
 mod status;
 mod ui;
@@ -49,7 +50,8 @@ struct Cli {
     /// Treat the current directory as a folder of repos rather than one repo.
     /// On its own: stage everything in each, generate all commit messages in
     /// parallel, then review them one by one as they arrive. With `status`:
-    /// explain every repo in the folder.
+    /// explain every repo in the folder. With `pull`: pull every repo in the
+    /// folder at once. `lgit root …` is the same as `lgit --root …`.
     ///
     /// Global so it can be written after the subcommand too — `lgit status
     /// --root` is how anyone would reach for it.
@@ -65,6 +67,9 @@ enum Command {
     /// Explain in plain English what's going on in this repo: what you're in
     /// the middle of, what could bite you, and what to do next
     Status,
+    /// `git pull` the branch you are on. With --root (or `lgit root pull`), every repo in this
+    /// folder pulls its own branch at once
+    Pull,
     /// Pull requests on GitHub, answered as JSON: list them, read one's diff, merge one.
     /// Runs as whoever `gh` is logged in as.
     Pr {
@@ -73,14 +78,31 @@ enum Command {
     },
 }
 
+/// The command line, with `lgit root …` read as `lgit --root …`: the word is how it gets said.
+fn args() -> Vec<std::ffi::OsString> {
+    let mut args: Vec<std::ffi::OsString> = std::env::args_os().collect();
+    if args.get(1).is_some_and(|word| word == "root") {
+        args[1] = "--root".into();
+    }
+    args
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
-    let cli = Cli::parse();
+    let cli = Cli::parse_from(args());
 
     // Before anything that could ask a question: Vaulty runs these from launchd, where
     // the setup wizard would wait forever on a keyboard nobody is at.
     if let Some(Command::Pr { command }) = &cli.command {
         std::process::exit(pr::run(command).await);
+    }
+
+    // A pull needs no model, so it never waits on the setup wizard either.
+    if let Some(Command::Pull) = cli.command {
+        return match cli.root {
+            true => pull::run_root().await,
+            false => pull::run(),
+        };
     }
 
     // Handle --config flag
