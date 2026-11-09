@@ -1,6 +1,6 @@
 # _cli
 
-Personal command-line tools. One repo, nine independent tools, no shared build.
+Personal command-line tools. One repo, ten independent tools, no shared build.
 
 | Tool | What it does | Stack | Skill |
 |---|---|---|---|
@@ -10,6 +10,7 @@ Personal command-line tools. One repo, nine independent tools, no shared build.
 | [**pocket**](pocket/README.md) | Export and search recorded conversations | Rust | ✅ |
 | [**waspy**](waspy/README.md) | Read your WhatsApp from the terminal, read-only | Rust | ✅ |
 | [**phog**](phog/README.md) | PostHog — HogQL, people by fingerprint, dashboards as files | Rust | ✅ |
+| [**hku**](hku/README.md) | Heroku — apps, dynos, config vars, releases, add-ons, domains and logs | Rust | ✅ |
 | [**lgit**](lgit/README.md) | AI-written commit messages, and a plain-English `status` | Rust | — |
 | [**ccx**](ccx/README.md) | Claude Code launcher whose sessions delete themselves on exit, unless you pass `--persist` | Bash | — |
 | [**ship**](ship/README.md) | The shared half of every repo's deploy: commit what is staged, push, build from a clean copy of the commit — no GitHub Actions | Bash | — |
@@ -185,6 +186,22 @@ phog call GET 'insights/?limit=5'                              # any API endpoin
 `call` asks before any write unless you pass `--yes`, and deleting only sets PostHog's
 `deleted` flag. Full docs: [phog/README.md](phog/README.md).
 
+## hku
+
+The [Heroku Platform API](https://devcenter.heroku.com/articles/platform-api-reference) from the
+terminal. It lists apps, dynos, formation, config vars, releases, add-ons and domains, fetches
+recent logs, and calls any other endpoint directly.
+
+```sh
+hku apps                              # every app, with its generation, region and team
+hku dynos my-app                      # the dynos running now, and any that crashed
+hku config my-app                     # config var names, values masked unless --reveal
+hku logs my-app --lines 200           # recent lines; Fir apps keep none
+hku call GET apps/my-app/builds       # any endpoint directly
+```
+
+`call` asks before any write unless you pass `--yes`. Full docs: [hku/README.md](hku/README.md).
+
 ## lgit
 
 Stage your changes and let an AI write the commit message. You can accept it, edit it,
@@ -265,6 +282,9 @@ cargo install --path vgoog
 # phog — needs rust 1.88+
 cargo install --path phog
 
+# hku — needs rust 1.88+
+cargo install --path hku
+
 # waspy — builds, signs, and schedules its sync job; safe to rerun. Then give
 # ~/.cargo/bin/waspy Full Disk Access (it opens the pane) so the job can keep the copy fresh.
 waspy/bin/install
@@ -343,6 +363,7 @@ config file**, so this one file overrides almost everything. There are two excep
 | **agree** | `AGREE_API_KEY` | `~/.config/agree/config.toml` |
 | **pocket** | `POCKET_APP_KEY` | `~/.config/pocket/key` |
 | **phog** | `POSTHOG_PERSONAL_API_KEY`, `POSTHOG_PROJECT_ID`, `POSTHOG_APP_HOST` (optional) | `~/.config/phog/config.toml` |
+| **hku** | `HEROKU_API_KEY`, `HEROKU_TEAM` (optional) | `~/.config/hku/config.json` |
 | **vgoog** | reads its `VGOOG_*` keys from `secrets.env` itself; `VGOOG_CONFIG_DIR` moves its config | `~/Library/Application Support/vgoog/config.toml` on macOS |
 | **lgit** | none when committing; `lgit --setup` copies `ANTHROPIC_API_KEY`, … into the config | `~/.config/lgit/config.toml` |
 | **waspy** | — | — (reads WhatsApp's own database; nothing to configure) |
